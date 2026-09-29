@@ -1,5 +1,7 @@
 import io
 import re
+import json
+
 from urllib.parse import urljoin, urlparse, unquote
 
 import pandas as pd
@@ -9,13 +11,13 @@ from bs4 import BeautifulSoup
 
 
 # =========================================================
-# PAGE SETUP
+# PAGE
 # =========================================================
 
 st.set_page_config(
-    page_title="Automotive Web Research Tool V2",
+    page_title="Automotive Web Research Tool V3",
     page_icon="🚗",
-    layout="wide"
+    layout="wide",
 )
 
 HEADERS = {
@@ -27,164 +29,323 @@ HEADERS = {
 
 
 # =========================================================
-# FILTER WORDS
+# BRAND LIST
 # =========================================================
+
+BRANDS = [
+    "Acura",
+    "Alfa Romeo",
+    "Aston Martin",
+    "Audi",
+    "BAIC",
+    "Bentley",
+    "Bestune",
+    "BMW",
+    "BYD",
+    "Cadillac",
+    "Changan",
+    "Chery",
+    "Chevrolet",
+    "Chrysler",
+    "Denza",
+    "Dodge",
+    "Exeed",
+    "FAW",
+    "Ferrari",
+    "Fiat",
+    "Ford",
+    "Foton",
+    "GAC",
+    "Geely",
+    "Genesis",
+    "GMC",
+    "Great Wall",
+    "GWM",
+    "Haval",
+    "Honda",
+    "Hongqi",
+    "Hyundai",
+    "iCAUR",
+    "Ineos",
+    "Infiniti",
+    "Isuzu",
+    "JAC",
+    "Jaecoo",
+    "Jaguar",
+    "Jeep",
+    "Jetour",
+    "Kia",
+    "Lamborghini",
+    "Land Rover",
+    "Lexus",
+    "Lincoln",
+    "Lotus",
+    "Maserati",
+    "Mazda",
+    "McLaren",
+    "Mercedes-Benz",
+    "MG",
+    "MINI",
+    "Mitsubishi",
+    "Nissan",
+    "Omoda",
+    "Ora",
+    "Peugeot",
+    "Porsche",
+    "RAM",
+    "Renault",
+    "Rolls-Royce",
+    "Skoda",
+    "Soueast",
+    "Ssangyong",
+    "Subaru",
+    "Suzuki",
+    "Tata",
+    "Tesla",
+    "Toyota",
+    "Volkswagen",
+    "Volvo",
+    "Yangwang",
+]
+
+
+# =========================================================
+# WORDS USED TO FIND MODEL SECTIONS
+# =========================================================
+
+SECTION_WORDS = (
+    "vehicle",
+    "vehicles",
+    "model",
+    "models",
+    "cars",
+    "our cars",
+    "our models",
+    "lineup",
+    "line-up",
+    "range",
+    "explore vehicles",
+    "explore models",
+)
+
 
 NOISE = {
     "home",
-    "about",
-    "contact",
-    "contact us",
+    "overview",
+    "gallery",
+    "brand",
+    "explore more",
+    "discover more",
+    "learn more",
+    "view more",
+    "details",
     "offers",
     "services",
     "owners",
     "news",
     "events",
-    "overview",
+    "contact",
+    "contact us",
+    "request a test drive",
     "test drive",
-    "book a test drive",
-    "request a quote",
-    "quote",
-    "brochure",
-    "download brochure",
-    "discover",
-    "explore",
-    "learn more",
-    "view more",
-    "view details",
-    "details",
-    "dealer",
-    "dealers",
-    "search",
-    "menu",
-    "privacy",
-    "terms",
-    "vehicles",
-    "models",
-    "new cars",
-    "see all vehicles",
-    "all vehicles",
+    "find a dealer",
     "build",
     "configure",
     "configurator",
-}
-
-GENERIC_PATH = {
     "vehicles",
-    "vehicle",
     "models",
-    "model",
     "cars",
-    "car",
-    "en",
-    "ar",
-    "qa",
-    "sa",
-    "ksa",
-    "qatar",
-    "home",
-    "index",
+    "see all vehicles",
+    "all vehicles",
+    "order options",
+    "request a call",
+    "brochure",
+    "download brochure",
+    "menu",
+    "search",
+    "privacy",
+    "terms",
 }
 
 
 # =========================================================
-# AUTOMOTIVE BRANDS
+# SPEC NAMES
 # =========================================================
 
-BRANDS = [
-    "Toyota",
-    "Genesis",
-    "Nissan",
-    "Lexus",
-    "Kia",
-    "Hyundai",
-    "Honda",
-    "BMW",
-    "Audi",
-    "Mercedes-Benz",
-    "Volkswagen",
-    "Porsche",
-    "Ford",
-    "Chevrolet",
-    "Cadillac",
-    "GMC",
-    "Jeep",
-    "Dodge",
-    "Land Rover",
-    "Jaguar",
-    "Mazda",
-    "Mitsubishi",
-    "Suzuki",
-    "Subaru",
-    "Volvo",
-    "MG",
-    "Geely",
-    "Chery",
-    "Changan",
-    "GAC",
-    "BYD",
-    "Exeed",
-    "Jetour",
-    "Jaecoo",
-    "Omoda",
-    "BAIC",
-    "Haval",
-    "GWM",
-    "Ora",
-    "Hongqi",
-    "Infiniti",
-    "Peugeot",
-    "Renault",
-    "Maserati",
-    "Bentley",
-    "Aston Martin",
-    "Ferrari",
-    "Lamborghini",
-    "McLaren",
-    "MINI",
-]
+SPEC_ALIASES = {
 
+    "Engine / Motor": [
+        "engine",
+        "engine type",
+        "motor type",
+        "electric motor",
+    ],
 
-# =========================================================
-# SPEC PATTERNS
-# =========================================================
+    "Displacement": [
+        "displacement",
+        "engine displacement",
+        "engine capacity",
+        "capacity",
+    ],
 
-SPEC_PATTERNS = {
+    "Cylinders": [
+        "cylinders",
+        "cylinder count",
+        "number of cylinders",
+    ],
 
-    "Engine": (
-        r"(?:engine|displacement|capacity)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Fuel / Powertrain": [
+        "fuel",
+        "fuel type",
+        "powertrain",
+        "propulsion",
+        "engine fuel",
+    ],
 
-    "Fuel / Powertrain": (
-        r"(?:fuel type|fuel|powertrain|propulsion)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Max Power": [
+        "max power",
+        "maximum power",
+        "power output",
+        "engine power",
+        "horsepower",
+        "hp",
+        "ps",
+        "kw",
+    ],
 
-    "Max Power": (
-        r"(?:maximum power|max\.?\s*power|max power|power output)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Max Torque": [
+        "max torque",
+        "maximum torque",
+        "torque output",
+        "engine torque",
+        "torque",
+    ],
 
-    "Max Torque": (
-        r"(?:maximum torque|max\.?\s*torque|max torque|torque output)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Transmission": [
+        "transmission",
+        "gearbox",
+        "transmission type",
+        "gear type",
+    ],
 
-    "Transmission": (
-        r"(?:transmission|gearbox)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Drivetrain": [
+        "drivetrain",
+        "drive type",
+        "drive system",
+        "driven wheels",
+        "wheel drive",
+        "fwd",
+        "rwd",
+        "awd",
+        "4wd",
+        "4x4",
+        "2wd",
+    ],
 
-    "Battery": (
-        r"(?:battery capacity|battery pack size|battery)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Battery Capacity": [
+        "battery capacity",
+        "battery pack",
+        "battery size",
+        "battery energy",
+        "usable battery",
+    ],
 
-    "Electric Range": (
-        r"(?:electric range|driving range|range)"
-        r"\s*[:\-]?\s*([^\n|]{2,100})"
-    ),
+    "Electric Range": [
+        "electric range",
+        "driving range",
+        "ev range",
+        "wltp range",
+        "nedc range",
+    ],
+
+    "Charging": [
+        "charging time",
+        "charging",
+        "dc charging",
+        "ac charging",
+        "charging power",
+        "fast charging",
+    ],
+
+    "Fuel Economy": [
+        "fuel economy",
+        "fuel consumption",
+        "mileage",
+        "km/l",
+        "l/100 km",
+    ],
+
+    "Fuel Tank": [
+        "fuel tank",
+        "tank capacity",
+        "fuel tank capacity",
+    ],
+
+    "Seats": [
+        "seating capacity",
+        "seat capacity",
+        "number of seats",
+        "seats",
+        "passenger capacity",
+        "passengers",
+    ],
+
+    "Length": [
+        "overall length",
+        "length",
+    ],
+
+    "Width": [
+        "overall width",
+        "width",
+    ],
+
+    "Height": [
+        "overall height",
+        "height",
+    ],
+
+    "Wheelbase": [
+        "wheelbase",
+        "wheel base",
+    ],
+
+    "Ground Clearance": [
+        "ground clearance",
+    ],
+
+    "Wheels / Tires": [
+        "wheel size",
+        "wheels",
+        "tyre size",
+        "tire size",
+        "tires",
+        "tyres",
+    ],
+
+    "Drive Modes": [
+        "drive modes",
+        "driving modes",
+        "terrain modes",
+    ],
+
+    "Acceleration": [
+        "0-100",
+        "0–100",
+        "acceleration",
+    ],
+
+    "Top Speed": [
+        "top speed",
+        "maximum speed",
+        "max speed",
+    ],
+
+    "Body Type": [
+        "body type",
+        "vehicle type",
+        "body style",
+    ],
 }
 
 
@@ -193,18 +354,21 @@ SPEC_PATTERNS = {
 # =========================================================
 
 def clean(text):
+
     return re.sub(
         r"\s+",
         " ",
-        text or ""
-    ).strip()
+        str(text or "")
+    ).strip(" :-|\t\r\n")
 
 
 def normalize_url(url):
 
     url = url.strip()
 
-    if url.startswith(("http://", "https://")):
+    if url.startswith(
+        ("http://", "https://")
+    ):
         return url
 
     return "https://" + url
@@ -219,15 +383,15 @@ def fetch(url):
     response = requests.get(
         url,
         headers=HEADERS,
-        timeout=25,
-        allow_redirects=True
+        timeout=30,
+        allow_redirects=True,
     )
 
     response.raise_for_status()
 
     return (
         response.url,
-        response.text
+        response.text,
     )
 
 
@@ -238,30 +402,39 @@ def fetch(url):
 def infer_make(
     soup,
     url,
-    manual_make
+    manual_make,
 ):
 
-    # ถ้าผู้ใช้กรอก Make เอง
-    if manual_make.strip():
-        return manual_make.strip()
+    # User manually entered Make
+    if clean(manual_make):
+
+        return clean(
+            manual_make
+        )
 
     title = ""
 
-    if soup.title and soup.title.string:
+    if soup.title:
+
         title = clean(
-            soup.title.string
+            soup.title.get_text(
+                " ",
+                strip=True
+            )
         )
 
     site_name = ""
 
     meta = soup.find(
         "meta",
-        {
-            "property": "og:site_name"
+        attrs={
+            "property":
+            "og:site_name"
         }
     )
 
     if meta:
+
         site_name = clean(
             meta.get(
                 "content",
@@ -269,156 +442,98 @@ def infer_make(
             )
         )
 
-    host = (
+    hostname = (
         urlparse(url)
         .netloc
-        .replace("www.", "")
     )
 
     blob = (
-        host
+        hostname
         + " "
         + title
         + " "
         + site_name
     ).lower()
 
-    # หา Brand จากชื่อเว็บ
-    for brand in BRANDS:
+    # Longest brand first
+    for brand in sorted(
+        BRANDS,
+        key=len,
+        reverse=True
+    ):
 
-        token = (
-            brand
-            .lower()
-            .replace("-", " ")
+        brand_lower = (
+            brand.lower()
+        )
+
+        compact_brand = (
+            brand_lower
+            .replace(
+                " ",
+                ""
+            )
+        )
+
+        compact_blob = re.sub(
+            r"[\W_]",
+            "",
+            blob
         )
 
         if (
-            token in blob
-            or token.replace(" ", "")
-            in blob.replace("-", "").replace(".", "")
+            brand_lower
+            in blob
+            or
+            compact_brand
+            in compact_blob
         ):
+
             return brand
 
-    # fallback
-    first = host.split(".")[0]
-
-    first = (
-        first
-        .replace("-ksa", "")
-        .replace("-qatar", "")
-        .replace("qatar", "")
+    # fallback from domain
+    domain = (
+        hostname
+        .replace(
+            "www.",
+            ""
+        )
+        .split(".")[0]
     )
 
     return (
-        first
-        .replace("-", " ")
+        domain
+        .replace(
+            "-",
+            " "
+        )
         .title()
     )
 
 
 # =========================================================
-# MODEL DETECTION FROM URL
+# URL → MODEL
 # =========================================================
 
-def get_model_slug(href):
-
-    path = (
-        unquote(
-            urlparse(href).path
-        )
-        .strip("/")
-    )
-
-    parts = [
-        part
-        for part in path.split("/")
-        if part
-    ]
-
-    if not parts:
-        return ""
-
-    lower_parts = [
-        part.lower()
-        for part in parts
-    ]
-
-    # เช่น
-    # /vehicles/yaris
-    # /models/corolla
-    # /cars/camry
-
-    for key in [
-        "vehicles",
-        "vehicle",
-        "models",
-        "model",
-        "cars",
-        "car",
-    ]:
-
-        if key in lower_parts:
-
-            index = lower_parts.index(
-                key
-            )
-
-            if index + 1 < len(parts):
-
-                candidate = parts[
-                    index + 1
-                ]
-
-                if (
-                    candidate.lower()
-                    not in GENERIC_PATH
-                ):
-                    return candidate
-
-    candidate = parts[-1]
-
-    if candidate.lower() in GENERIC_PATH:
-        return ""
-
-    if "." in candidate:
-        return ""
-
-    return candidate
-
-
-def pretty_model_name(slug):
+def pretty_slug(slug):
 
     slug = re.sub(
         r"[-_]+",
         " ",
-        slug
+        unquote(slug)
     ).strip()
 
     words = []
 
     for word in slug.split():
 
-        # เช่น
-        # gr86
-        # bz4x
-        # cx90
-
-        if re.search(
-            r"\d",
-            word
+        if (
+            re.search(
+                r"\d",
+                word
+            )
+            or
+            len(word) <= 3
         ):
-
-            if len(word) <= 8:
-                words.append(
-                    word.upper()
-                )
-
-            else:
-                words.append(
-                    word.title()
-                )
-
-        elif len(word) <= 3:
 
             words.append(
                 word.upper()
@@ -435,43 +550,271 @@ def pretty_model_name(slug):
     )
 
 
+def candidate_name_from_url(url):
+
+    path = (
+        urlparse(url)
+        .path
+        .strip("/")
+    )
+
+    parts = [
+        part
+        for part in path.split("/")
+        if part
+    ]
+
+    bad = {
+        "en",
+        "ar",
+        "sa",
+        "qa",
+        "ksa",
+        "vehicles",
+        "vehicle",
+        "models",
+        "model",
+        "cars",
+        "car",
+        "suv",
+        "sedan",
+        "mpv",
+        "commercial",
+    }
+
+    lower_parts = [
+        part.lower()
+        for part in parts
+    ]
+
+    for key in (
+        "vehicles",
+        "vehicle",
+        "models",
+        "model",
+        "cars",
+        "car",
+    ):
+
+        if key in lower_parts:
+
+            index = (
+                lower_parts
+                .index(key)
+            )
+
+            if (
+                index + 1
+                < len(parts)
+            ):
+
+                candidate = (
+                    parts[
+                        index + 1
+                    ]
+                )
+
+                if (
+                    candidate.lower()
+                    not in bad
+                ):
+
+                    return pretty_slug(
+                        candidate
+                    )
+
+    if parts:
+
+        candidate = parts[-1]
+
+        if (
+            candidate.lower()
+            not in bad
+            and
+            "." not in candidate
+        ):
+
+            return pretty_slug(
+                candidate
+            )
+
+    return ""
+
+
 # =========================================================
-# FIND MODEL LINKS
+# JSON-LD MODEL SEARCH
 # =========================================================
 
-def find_models(
+def jsonld_models(
     soup,
     base_url,
-    make
+    make,
+):
+
+    rows = []
+
+    scripts = soup.find_all(
+        "script",
+        type="application/ld+json"
+    )
+
+    for tag in scripts:
+
+        try:
+
+            data = json.loads(
+                tag.string or ""
+            )
+
+        except Exception:
+
+            continue
+
+        if isinstance(
+            data,
+            list
+        ):
+
+            stack = data
+
+        else:
+
+            stack = [data]
+
+        while stack:
+
+            item = stack.pop()
+
+            if isinstance(
+                item,
+                dict
+            ):
+
+                item_type = str(
+                    item.get(
+                        "@type",
+                        ""
+                    )
+                ).lower()
+
+                if any(
+                    keyword
+                    in item_type
+                    for keyword in (
+                        "product",
+                        "vehicle",
+                        "car",
+                        "itemlist",
+                    )
+                ):
+
+                    name = clean(
+                        item.get(
+                            "name",
+                            ""
+                        )
+                    )
+
+                    url = urljoin(
+                        base_url,
+                        clean(
+                            item.get(
+                                "url",
+                                ""
+                            )
+                        )
+                    )
+
+                    if (
+                        name
+                        and
+                        name.lower()
+                        not in NOISE
+                        and
+                        len(name) < 70
+                    ):
+
+                        rows.append(
+                            (
+                                make,
+                                name,
+                                url,
+                                "JSON-LD",
+                            )
+                        )
+
+                for value in (
+                    item.values()
+                ):
+
+                    if isinstance(
+                        value,
+                        (dict, list)
+                    ):
+
+                        stack.append(
+                            value
+                        )
+
+            elif isinstance(
+                item,
+                list
+            ):
+
+                stack.extend(
+                    item
+                )
+
+    return rows
+
+
+# =========================================================
+# DISCOVER MODELS
+# =========================================================
+
+def discover_models(
+    soup,
+    base_url,
+    make,
 ):
 
     host = (
         urlparse(base_url)
         .netloc
         .lower()
-        .replace("www.", "")
+        .replace(
+            "www.",
+            ""
+        )
     )
 
     rows = []
+
+    # -----------------------------------------------------
+    # METHOD 1
+    # Links + URL + surrounding section
+    # -----------------------------------------------------
 
     for link in soup.find_all(
         "a",
         href=True
     ):
 
-        href = urljoin(
+        url = urljoin(
             base_url,
             link["href"]
         )
 
         link_host = (
-            urlparse(href)
+            urlparse(url)
             .netloc
             .lower()
-            .replace("www.", "")
+            .replace(
+                "www.",
+                ""
+            )
         )
 
-        # เอาเฉพาะเว็บเดียวกัน
         if link_host != host:
             continue
 
@@ -483,79 +826,197 @@ def find_models(
         )
 
         path = (
-            urlparse(href)
+            urlparse(url)
             .path
             .lower()
         )
 
-        # ต้องดูเหมือน URL ของรถ
-        vehicle_route = any(
-            route in path
-            for route in [
-                "/vehicles/",
-                "/vehicle/",
-                "/models/",
-                "/model/",
-                "/cars/",
-                "/car/",
-            ]
+        # URL signal
+        url_signal = any(
+            "/" + keyword + "/"
+            in path
+            for keyword in (
+                "vehicle",
+                "vehicles",
+                "model",
+                "models",
+                "car",
+                "cars",
+            )
         )
 
-        if not vehicle_route:
-            continue
+        # Look at surrounding section
+        section_signal = False
 
-        slug = get_model_slug(
-            href
-        )
+        parents = list(
+            link.parents
+        )[:5]
 
-        if not slug:
-            continue
+        for parent in parents:
 
-        # =====================================
-        # จุดสำคัญของ V2
-        #
-        # ถ้าเว็บเขียนว่า Overview
-        # แต่ URL เป็น /vehicles/yaris
-        #
-        # ให้ใช้ Yaris
-        # =====================================
+            parent_text = clean(
+                parent.get_text(
+                    " ",
+                    strip=True
+                )
+            ).lower()[:800]
 
-        if (
-            not text
-            or text.lower() in NOISE
-            or len(text) > 70
+            if any(
+                word
+                in parent_text
+                for word
+                in SECTION_WORDS
+            ):
+
+                section_signal = True
+                break
+
+        if not (
+            url_signal
+            or
+            section_signal
         ):
 
-            model = pretty_model_name(
-                slug
+            continue
+
+        # Generic button text
+        if (
+            not text
+            or
+            text.lower()
+            in NOISE
+            or
+            len(text) > 70
+        ):
+
+            name = (
+                candidate_name_from_url(
+                    url
+                )
             )
 
-            detected_from = (
-                "URL slug"
-            )
+            source = "URL"
 
         else:
 
-            model = text
+            name = text
+            source = "Link/Card"
 
-            detected_from = (
-                "Link text"
+        if (
+            name
+            and
+            name.lower()
+            not in NOISE
+            and
+            len(name) < 70
+        ):
+
+            rows.append(
+                (
+                    make,
+                    name,
+                    url,
+                    source,
+                )
             )
 
-        if not model:
-            continue
 
-        if model.lower() in NOISE:
-            continue
+    # -----------------------------------------------------
+    # METHOD 2
+    # Heading:
+    #
+    # The Kia K4
+    # The Kia EV5
+    # The Kia Sportage L
+    # -----------------------------------------------------
 
-        rows.append(
-            [
-                make,
-                model,
-                href,
-                detected_from,
-            ]
+    headings = soup.find_all(
+        re.compile(
+            "^h[1-4]$"
         )
+    )
+
+    for heading in headings:
+
+        text = clean(
+            heading.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        pattern = (
+            r"^(?:the\s+)?"
+            + re.escape(make)
+            + r"\s+(.+)$"
+        )
+
+        match = re.match(
+            pattern,
+            text,
+            re.I
+        )
+
+        if match:
+
+            name = clean(
+                match.group(1)
+            )
+
+            if (
+                name
+                and
+                name.lower()
+                not in NOISE
+            ):
+
+                near_link = (
+                    heading.find_next(
+                        "a",
+                        href=True
+                    )
+                )
+
+                if near_link:
+
+                    model_url = urljoin(
+                        base_url,
+                        near_link[
+                            "href"
+                        ]
+                    )
+
+                else:
+
+                    model_url = (
+                        base_url
+                    )
+
+                rows.append(
+                    (
+                        make,
+                        name,
+                        model_url,
+                        "Heading",
+                    )
+                )
+
+
+    # -----------------------------------------------------
+    # METHOD 3
+    # JSON-LD
+    # -----------------------------------------------------
+
+    rows += jsonld_models(
+        soup,
+        base_url,
+        make
+    )
+
+
+    # -----------------------------------------------------
+    # DATAFRAME
+    # -----------------------------------------------------
 
     df = pd.DataFrame(
         rows,
@@ -568,56 +1029,49 @@ def find_models(
     )
 
     if df.empty:
+
         return df
 
-    # ลบ URL ซ้ำ
-    df = df.drop_duplicates(
-        subset=[
-            "Model URL"
-        ]
-    )
 
-    # ถ้ายังเจอคำ Overview
-    # ให้ย้อนกลับไปใช้ URL slug
-
-    bad_rows = (
+    # Remove year at end
+    df["Model"] = (
         df["Model"]
         .str
-        .lower()
-        .isin(NOISE)
-    )
-
-    df.loc[
-        bad_rows,
-        "Model"
-    ] = (
-        df.loc[
-            bad_rows,
-            "Model URL"
-        ]
-        .map(
-            lambda u:
-            pretty_model_name(
-                get_model_slug(u)
-            )
+        .replace(
+            r"\s+\d{4}$",
+            "",
+            regex=True
         )
+        .str
+        .strip()
     )
 
-    # กรอง noise อีกรอบ
+
+    # Remove noise
     df = df[
-        ~df["Model"]
+        ~df[
+            "Model"
+        ]
         .str
         .lower()
         .isin(NOISE)
     ]
 
+
+    # Remove duplicates
+    df = df.drop_duplicates(
+        subset=[
+            "Make",
+            "Model",
+        ],
+        keep="first"
+    )
+
+
     return (
         df
         .sort_values(
-            [
-                "Model",
-                "Model URL",
-            ]
+            "Model"
         )
         .reset_index(
             drop=True
@@ -626,14 +1080,196 @@ def find_models(
 
 
 # =========================================================
-# SPEC EXTRACTION
+# SPEC PAIRS
+# =========================================================
+
+def add_pair(
+    pairs,
+    key,
+    value,
+):
+
+    key = clean(key)
+    value = clean(value)
+
+    if not key:
+        return
+
+    if not value:
+        return
+
+    if len(key) > 100:
+        return
+
+    if len(value) > 300:
+        return
+
+    pairs.append(
+        (
+            key,
+            value
+        )
+    )
+
+
+def extract_pairs(
+    soup
+):
+
+    pairs = []
+
+
+    # -----------------------------------------------------
+    # HTML TABLES
+    # -----------------------------------------------------
+
+    for row in soup.find_all(
+        "tr"
+    ):
+
+        cells = [
+            clean(
+                cell.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+            for cell
+            in row.find_all(
+                [
+                    "th",
+                    "td",
+                ]
+            )
+        ]
+
+        if len(cells) >= 2:
+
+            add_pair(
+                pairs,
+                cells[0],
+                " | ".join(
+                    cells[1:]
+                )
+            )
+
+
+    # -----------------------------------------------------
+    # DT / DD
+    # -----------------------------------------------------
+
+    for dt in soup.find_all(
+        "dt"
+    ):
+
+        dd = (
+            dt.find_next_sibling(
+                "dd"
+            )
+        )
+
+        if dd:
+
+            add_pair(
+                pairs,
+                dt.get_text(
+                    " ",
+                    strip=True
+                ),
+                dd.get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+
+    # -----------------------------------------------------
+    # Label : Value
+    # -----------------------------------------------------
+
+    for element in soup.find_all(
+        [
+            "li",
+            "p",
+            "div",
+        ]
+    ):
+
+        text = clean(
+            element.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        if (
+            len(text) > 3
+            and
+            len(text) < 220
+        ):
+
+            match = re.match(
+                r"^([^:]{2,60})"
+                r"\s*:\s*"
+                r"(.{1,150})$",
+                text
+            )
+
+            if match:
+
+                add_pair(
+                    pairs,
+                    match.group(1),
+                    match.group(2)
+                )
+
+    return pairs
+
+
+# =========================================================
+# MAP WEBSITE LABEL → STANDARD FIELD
+# =========================================================
+
+def canonical_field(
+    label
+):
+
+    label = (
+        clean(label)
+        .lower()
+    )
+
+    for (
+        field,
+        aliases
+    ) in SPEC_ALIASES.items():
+
+        for alias in aliases:
+
+            if (
+                alias == label
+                or
+                alias in label
+            ):
+
+                return field
+
+    return None
+
+
+# =========================================================
+# INSPECT MODEL SPECS
 # =========================================================
 
 @st.cache_data(
     ttl=600,
     show_spinner=False
 )
-def extract_specs(url):
+def inspect_model(
+    url,
+    make,
+    model,
+):
 
     try:
 
@@ -646,58 +1282,193 @@ def extract_specs(url):
             "html.parser"
         )
 
-        text = soup.get_text(
-            "\n",
-            strip=True
+        result = {
+            "Make":
+            make,
+
+            "Model":
+            model,
+
+            "Source URL":
+            final_url,
+        }
+
+        raw_matches = []
+
+
+        # -------------------------------------------------
+        # Structured HTML values
+        # -------------------------------------------------
+
+        for (
+            key,
+            value
+        ) in extract_pairs(
+            soup
+        ):
+
+            field = (
+                canonical_field(
+                    key
+                )
+            )
+
+            if (
+                field
+                and
+                not result.get(
+                    field
+                )
+            ):
+
+                result[
+                    field
+                ] = value
+
+                raw_matches.append(
+                    f"{key}: {value}"
+                )
+
+
+        # -------------------------------------------------
+        # Full page text
+        # -------------------------------------------------
+
+        text = clean(
+            soup.get_text(
+                "\n",
+                strip=True
+            )
         )
 
-        result = {
-            "Source URL":
-            final_url
+
+        # -------------------------------------------------
+        # FALLBACK REGEX
+        # -------------------------------------------------
+
+        fallback_patterns = {
+
+            "Max Power":
+            (
+                r"(?i)"
+                r"(?:max(?:imum)?\s+power"
+                r"|power output"
+                r"|horsepower)"
+                r"\s*[:\-]?\s*"
+                r"([0-9.,]+\s*"
+                r"(?:hp|ps|kw|bhp))"
+            ),
+
+            "Max Torque":
+            (
+                r"(?i)"
+                r"(?:max(?:imum)?\s+torque"
+                r"|torque)"
+                r"\s*[:\-]?\s*"
+                r"([0-9.,]+\s*"
+                r"(?:nm|n\.m))"
+            ),
+
+            "Battery Capacity":
+            (
+                r"(?i)"
+                r"(?:battery"
+                r"(?:\s+capacity"
+                r"|\s+pack"
+                r"|\s+size)?)"
+                r"\s*[:\-]?\s*"
+                r"([0-9.,]+\s*kwh)"
+            ),
+
+            "Electric Range":
+            (
+                r"(?i)"
+                r"(?:electric"
+                r"|driving"
+                r"|ev"
+                r"|wltp)?"
+                r"\s*range"
+                r"\s*[:\-]?\s*"
+                r"([0-9.,]+\s*km)"
+            ),
+
+            "Drivetrain":
+            (
+                r"(?i)"
+                r"\b("
+                r"FWD"
+                r"|RWD"
+                r"|AWD"
+                r"|4WD"
+                r"|4X4"
+                r"|2WD"
+                r")\b"
+            ),
         }
+
 
         for (
             field,
             pattern
-        ) in SPEC_PATTERNS.items():
+        ) in fallback_patterns.items():
 
-            match = re.search(
-                pattern,
-                text,
-                re.I
-            )
+            if not result.get(
+                field
+            ):
 
-            if match:
-
-                result[field] = clean(
-                    match.group(1)
+                match = re.search(
+                    pattern,
+                    text
                 )
 
-            else:
+                if match:
 
-                result[field] = ""
+                    result[
+                        field
+                    ] = clean(
+                        match.group(1)
+                    )
+
+
+        # -------------------------------------------------
+        # Keep raw matched specs for checking
+        # -------------------------------------------------
+
+        result[
+            "Raw matched specs"
+        ] = " ; ".join(
+            raw_matches[:80]
+        )
 
         return result
+
 
     except Exception as error:
 
         return {
+
+            "Make":
+            make,
+
+            "Model":
+            model,
+
             "Source URL":
             url,
 
             "Error":
-            str(error)
+            str(error),
         }
 
 
 # =========================================================
-# EXCEL EXPORT
+# EXCEL
 # =========================================================
 
 def make_excel(
     models,
     specs,
-    source_url
+    source_url,
 ):
 
     output = io.BytesIO()
@@ -715,7 +1486,8 @@ def make_excel(
 
         if (
             specs is not None
-            and not specs.empty
+            and
+            not specs.empty
         ):
 
             specs.to_excel(
@@ -727,14 +1499,16 @@ def make_excel(
         methodology = pd.DataFrame(
             [
                 {
-                    "Source":
+                    "Source URL":
                     source_url,
 
                     "Rule":
                     (
-                        "Research assistance. "
-                        "Verify current model/spec "
-                        "against OEM source before production use."
+                        "Only display fields "
+                        "found on source page. "
+                        "Blank means not detected. "
+                        "Verify against OEM page "
+                        "before final use."
                     )
                 }
             ]
@@ -750,36 +1524,43 @@ def make_excel(
 
 
 # =========================================================
-# USER INTERFACE
+# UI
 # =========================================================
 
 st.title(
-    "🚗 Automotive Web Research Tool V2"
+    "🚗 Automotive Web Research Tool V3"
 )
 
 st.caption(
-    "OEM URL → Make → Model → Specs → Excel"
+    "URL → Make → Model → Flexible Specs → Excel"
 )
 
 
-# Sidebar
-manual_make = st.sidebar.text_input(
-    "Make (optional)",
-    placeholder="Leave blank for auto-detect"
-)
-
-max_pages = st.sidebar.slider(
-    "Max model pages for spec scan",
-    min_value=1,
-    max_value=30,
-    value=10
+manual_make = (
+    st.sidebar.text_input(
+        "Make (optional)",
+        placeholder=(
+            "Auto-detect if blank"
+        )
+    )
 )
 
 
-# URL input
+max_pages = (
+    st.sidebar.slider(
+        "Max model pages for spec scan",
+        min_value=1,
+        max_value=50,
+        value=10,
+    )
+)
+
+
 url = st.text_input(
     "Website URL",
-    placeholder="https://www.toyota.com.sa/en"
+    placeholder=(
+        "https://www.kia.com/sa/en/main.html"
+    )
 )
 
 
@@ -790,7 +1571,7 @@ url = st.text_input(
 if st.button(
     "🔎 Check website",
     type="primary",
-    use_container_width=True
+    use_container_width=True,
 ):
 
     if not url.strip():
@@ -804,7 +1585,9 @@ if st.button(
     try:
 
         final_url, html = fetch(
-            normalize_url(url)
+            normalize_url(
+                url
+            )
         )
 
         soup = BeautifulSoup(
@@ -818,14 +1601,14 @@ if st.button(
             manual_make
         )
 
-        models_df = find_models(
+        models = discover_models(
             soup,
             final_url,
             make
         )
 
         st.session_state.models = (
-            models_df
+            models
         )
 
         st.session_state.source = (
@@ -836,20 +1619,24 @@ if st.button(
             pd.DataFrame()
         )
 
+        st.session_state.make = (
+            make
+        )
+
     except Exception as error:
 
         st.error(
-            f"Could not read website: {error}"
+            str(error)
         )
 
 
 # =========================================================
-# RESULTS
+# MODEL RESULTS
 # =========================================================
 
 if "models" in st.session_state:
 
-    models_df = (
+    models = (
         st.session_state.models
     )
 
@@ -857,56 +1644,53 @@ if "models" in st.session_state:
         2
     )
 
-    if not models_df.empty:
-
-        col1.metric(
-            "Make",
-            models_df[
-                "Make"
-            ].iloc[0]
-        )
-
-    else:
-
-        col1.metric(
-            "Make",
-            "-"
-        )
+    col1.metric(
+        "Make",
+        st.session_state.make
+    )
 
     col2.metric(
-        "Detected model links",
-        len(models_df)
+        "Detected models",
+        len(models)
     )
+
 
     st.subheader(
-        "1. Models"
+        "1. Models found"
     )
 
-    if models_df.empty:
+
+    if models.empty:
 
         st.warning(
-            "No model routes detected. "
-            "This website may require JavaScript rendering."
+            "No reliable model candidates "
+            "detected from the returned HTML. "
+            "This site may require JavaScript "
+            "rendering or a dedicated adapter."
         )
+
 
     else:
 
-        editable_df = (
-            models_df.assign(
+        editable = (
+            models.assign(
                 Inspect=False
             )
         )
 
+
         edited = st.data_editor(
-            editable_df,
+            editable,
             hide_index=True,
             use_container_width=True,
 
             column_config={
+
                 "Inspect":
                 st.column_config.CheckboxColumn(
                     "Inspect specs"
                 )
+
             },
 
             disabled=[
@@ -918,12 +1702,12 @@ if "models" in st.session_state:
         )
 
 
-        # =====================================
-        # SPEC SCAN BUTTON
-        # =====================================
+        # -------------------------------------------------
+        # INSPECT SPECS
+        # -------------------------------------------------
 
         if st.button(
-            "⚙️ Inspect selected model pages"
+            "⚙️ Inspect selected models"
         ):
 
             selected = edited[
@@ -934,50 +1718,51 @@ if "models" in st.session_state:
                 max_pages
             )
 
+
             if selected.empty:
 
                 st.warning(
-                    "Tick at least one model."
+                    "Select at least one model."
                 )
+
 
             else:
 
-                spec_rows = []
-
-                progress = st.progress(
-                    0
+                progress = (
+                    st.progress(
+                        0
+                    )
                 )
+
+                results = []
 
                 total = len(
                     selected
                 )
 
-                for index, (
-                    _,
-                    row
+
+                for (
+                    index,
+                    (_, row)
                 ) in enumerate(
                     selected.iterrows()
                 ):
 
-                    result = {
-                        "Make":
-                        row["Make"],
-
-                        "Model":
-                        row["Model"]
-                    }
-
-                    specs = extract_specs(
-                        row[
-                            "Model URL"
-                        ]
+                    result = (
+                        inspect_model(
+                            row[
+                                "Model URL"
+                            ],
+                            row[
+                                "Make"
+                            ],
+                            row[
+                                "Model"
+                            ],
+                        )
                     )
 
-                    result.update(
-                        specs
-                    )
-
-                    spec_rows.append(
+                    results.append(
                         result
                     )
 
@@ -986,16 +1771,17 @@ if "models" in st.session_state:
                         / total
                     )
 
+
                 st.session_state.specdf = (
                     pd.DataFrame(
-                        spec_rows
+                        results
                     )
                 )
 
 
-# =========================================================
-# SPEC TABLE
-# =========================================================
+    # =====================================================
+    # SPECS TABLE
+    # =====================================================
 
     if (
         "specdf"
@@ -1005,19 +1791,72 @@ if "models" in st.session_state:
     ):
 
         st.subheader(
-            "2. Spec candidates"
+            "2. Specs found"
         )
+
+        specs_df = (
+            st.session_state
+            .specdf
+            .copy()
+        )
+
+
+        # -----------------------------------------------
+        # Important:
+        #
+        # Column is shown only if
+        # at least one selected vehicle
+        # actually has data.
+        # -----------------------------------------------
+
+        useful_columns = []
+
+        for column in specs_df.columns:
+
+            if column in (
+                "Make",
+                "Model",
+                "Source URL",
+                "Error",
+            ):
+
+                useful_columns.append(
+                    column
+                )
+
+                continue
+
+
+            has_data = (
+                specs_df[column]
+                .replace(
+                    "",
+                    pd.NA
+                )
+                .notna()
+                .any()
+            )
+
+
+            if has_data:
+
+                useful_columns.append(
+                    column
+                )
+
 
         st.dataframe(
-            st.session_state.specdf,
+            specs_df[
+                useful_columns
+            ],
             use_container_width=True,
-            hide_index=True
+            hide_index=True,
         )
 
 
-# =========================================================
-# EXCEL DOWNLOAD
-# =========================================================
+    # =====================================================
+    # EXCEL
+    # =====================================================
 
     specs_df = (
         st.session_state.get(
@@ -1026,28 +1865,42 @@ if "models" in st.session_state:
         )
     )
 
-    excel_file = make_excel(
-        models_df,
-        specs_df,
-        st.session_state.source
+
+    excel_file = (
+        make_excel(
+            models,
+            specs_df,
+            st.session_state.source,
+        )
     )
+
 
     st.download_button(
         "⬇️ Download Excel",
+
         data=excel_file,
+
         file_name=(
-            "automotive_web_research_v2.xlsx"
+            "automotive_research_v3.xlsx"
         ),
+
         mime=(
             "application/"
             "vnd.openxmlformats-officedocument."
             "spreadsheetml.sheet"
         ),
-        use_container_width=True
+
+        use_container_width=True,
     )
 
 
-st.caption(
-    "V2: generic labels such as Overview / Explore "
-    "are replaced with model names detected from the vehicle URL."
+# =========================================================
+# RULE
+# =========================================================
+
+st.info(
+    "V3 rule: "
+    "if the source publishes a field, show it; "
+    "if it does not, leave it blank. "
+    "No invented values."
 )

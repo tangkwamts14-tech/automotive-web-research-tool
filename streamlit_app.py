@@ -15,14 +15,15 @@ from playwright.sync_api import sync_playwright
 # =========================================================
 
 st.set_page_config(
-    page_title="Automotive Web Research Tool V4",
+    page_title="Automotive Web Research Tool V5",
     page_icon="🚗",
     layout="wide",
 )
 
-st.title("🚗 Automotive Web Research Tool V4")
+st.title("🚗 Automotive Web Research Tool V5")
+
 st.caption(
-    "Browser rendering → Make → Models → Flexible Specs → Excel"
+    "Browser → Make → Model Card → Model URL → Flexible Specs → Excel"
 )
 
 
@@ -52,24 +53,8 @@ BRANDS = [
 
 
 # =========================================================
-# WORDS / FILTERS
+# FILTERS
 # =========================================================
-
-SECTION_WORDS = [
-    "vehicle",
-    "vehicles",
-    "model",
-    "models",
-    "our models",
-    "all models",
-    "cars",
-    "our cars",
-    "lineup",
-    "line-up",
-    "range",
-    "explore models",
-    "explore vehicles",
-]
 
 NOISE = {
     "",
@@ -92,9 +77,14 @@ NOISE = {
     "events",
     "contact",
     "contact us",
-    "test drive",
-    "request a test drive",
+    "connect",
+    "about",
+    "about us",
+    "shopping tools",
     "request a quote",
+    "request a call",
+    "request a test drive",
+    "test drive",
     "find a dealer",
     "dealer",
     "dealers",
@@ -119,7 +109,43 @@ NOISE = {
     "terms",
     "login",
     "sign in",
+    "country",
+    "language",
+    "saudi arabia aljabr",
+    "saudi arabia",
+    "aljabr",
 }
+
+
+BAD_PHRASES = [
+    "vat included",
+    "request a quote",
+    "request a call",
+    "request a test drive",
+    "shopping tools",
+    "customer service",
+    "find a dealer",
+    "accessories",
+    "warranty",
+    "cookie",
+    "privacy",
+    "terms",
+    "country",
+    "language",
+    "saudi arabia aljabr",
+]
+
+
+CTA_WORDS = [
+    "learn more",
+    "view details",
+    "discover",
+    "explore",
+    "details",
+    "overview",
+    "read more",
+    "more",
+]
 
 
 # =========================================================
@@ -154,12 +180,10 @@ SPEC_ALIASES = {
         "engine displacement",
         "engine capacity",
         "capacity",
-        "cc",
     ],
 
     "Cylinders": [
         "cylinders",
-        "cylinder",
         "cylinder count",
         "number of cylinders",
     ],
@@ -307,7 +331,6 @@ SPEC_ALIASES = {
 
     "Wheels / Tires": [
         "wheel size",
-        "wheel",
         "wheels",
         "tire size",
         "tyre size",
@@ -337,10 +360,11 @@ SPEC_ALIASES = {
 
 
 # =========================================================
-# BASIC
+# BASIC FUNCTIONS
 # =========================================================
 
 def clean(value):
+
     return re.sub(
         r"\s+",
         " ",
@@ -349,9 +373,12 @@ def clean(value):
 
 
 def normalize_url(url):
+
     url = clean(url)
 
-    if url.startswith(("http://", "https://")):
+    if url.startswith(
+        ("http://", "https://")
+    ):
         return url
 
     return "https://" + url
@@ -359,14 +386,25 @@ def normalize_url(url):
 
 def same_domain(url1, url2):
 
-    a = urlparse(url1).netloc.lower().replace("www.", "")
-    b = urlparse(url2).netloc.lower().replace("www.", "")
+    a = (
+        urlparse(url1)
+        .netloc
+        .lower()
+        .replace("www.", "")
+    )
+
+    b = (
+        urlparse(url2)
+        .netloc
+        .lower()
+        .replace("www.", "")
+    )
 
     return a == b
 
 
 # =========================================================
-# FIND CHROMIUM
+# CHROMIUM
 # =========================================================
 
 def find_chromium():
@@ -390,7 +428,7 @@ def find_chromium():
 
 
 # =========================================================
-# BROWSER RENDERING
+# RENDER WEBSITE
 # =========================================================
 
 def render_page(url, wait_ms=3500):
@@ -399,7 +437,7 @@ def render_page(url, wait_ms=3500):
 
     with sync_playwright() as p:
 
-        launch_args = {
+        options = {
             "headless": True,
             "args": [
                 "--no-sandbox",
@@ -409,27 +447,37 @@ def render_page(url, wait_ms=3500):
         }
 
         if chromium_path:
-            launch_args["executable_path"] = chromium_path
+            options[
+                "executable_path"
+            ] = chromium_path
 
-        browser = p.chromium.launch(
-            **launch_args
+        browser = (
+            p.chromium.launch(
+                **options
+            )
         )
 
-        context = browser.new_context(
-            viewport={
-                "width": 1440,
-                "height": 1200,
-            },
-            user_agent=(
-                "Mozilla/5.0 "
-                "(Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 "
-                "Chrome/124 Safari/537.36"
-            ),
-            locale="en-US",
+        context = (
+            browser.new_context(
+                viewport={
+                    "width": 1440,
+                    "height": 1200,
+                },
+
+                user_agent=(
+                    "Mozilla/5.0 "
+                    "(Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 "
+                    "Chrome/124 Safari/537.36"
+                ),
+
+                locale="en-US",
+            )
         )
 
-        page = context.new_page()
+        page = (
+            context.new_page()
+        )
 
         page.goto(
             url,
@@ -437,56 +485,122 @@ def render_page(url, wait_ms=3500):
             timeout=60000,
         )
 
-        # Wait for JS applications
         try:
+
             page.wait_for_load_state(
                 "networkidle",
                 timeout=15000
             )
+
         except Exception:
+
             pass
 
         page.wait_for_timeout(
             wait_ms
         )
 
-        # Try to click common cookie buttons
-        cookie_words = [
+
+        # -----------------------------------------------
+        # COOKIE
+        # -----------------------------------------------
+
+        for label in [
             "Accept",
             "Accept All",
             "Allow All",
-            "I Agree",
             "Agree",
-        ]
-
-        for word in cookie_words:
+            "I Agree",
+        ]:
 
             try:
-                button = page.get_by_role(
-                    "button",
-                    name=re.compile(
-                        rf"^{re.escape(word)}$",
-                        re.I
+
+                button = (
+                    page.get_by_role(
+                        "button",
+                        name=re.compile(
+                            rf"^{re.escape(label)}$",
+                            re.I
+                        )
                     )
                 )
 
                 if button.count() > 0:
+
                     button.first.click(
                         timeout=1000
                     )
-                    page.wait_for_timeout(500)
+
+                    page.wait_for_timeout(
+                        500
+                    )
+
                     break
 
             except Exception:
+
                 pass
 
-        # Scroll so lazy-loaded model cards appear
+
+        # -----------------------------------------------
+        # Try opening vehicle/model menu
+        # -----------------------------------------------
+
+        for menu_name in [
+            "Vehicle",
+            "Vehicles",
+            "Models",
+            "Our Models",
+            "All Models",
+            "Cars",
+        ]:
+
+            try:
+
+                menu = (
+                    page.get_by_text(
+                        menu_name,
+                        exact=True
+                    )
+                )
+
+                if menu.count() > 0:
+
+                    menu.first.click(
+                        timeout=1500
+                    )
+
+                    page.wait_for_timeout(
+                        1200
+                    )
+
+                    break
+
+            except Exception:
+
+                pass
+
+
+        # -----------------------------------------------
+        # SCROLL
+        # -----------------------------------------------
+
         try:
 
-            for _ in range(5):
+            height = page.evaluate(
+                "document.body.scrollHeight"
+            )
+
+            for fraction in [
+                0.20,
+                0.40,
+                0.60,
+                0.80,
+                1.00,
+            ]:
 
                 page.evaluate(
-                    "window.scrollBy(0, document.body.scrollHeight / 5)"
+                    f"window.scrollTo(0, {int(height * fraction)})"
                 )
 
                 page.wait_for_timeout(
@@ -498,41 +612,89 @@ def render_page(url, wait_ms=3500):
             )
 
         except Exception:
+
             pass
 
-        final_url = page.url
-        html = page.content()
-        visible_text = page.locator(
-            "body"
-        ).inner_text(
-            timeout=10000
+
+        final_url = (
+            page.url
         )
 
-        links = page.locator(
+        html = (
+            page.content()
+        )
+
+        visible_text = (
+            page.locator(
+                "body"
+            )
+            .inner_text(
+                timeout=10000
+            )
+        )
+
+
+        # -----------------------------------------------
+        # IMPORTANT V5:
+        # collect browser DOM elements with
+        # text + href + parent text
+        # -----------------------------------------------
+
+        elements = page.locator(
             "a"
         ).evaluate_all(
             """
-            els => els.map(a => ({
-                text: (a.innerText || a.textContent || '').trim(),
-                href: a.href || '',
-                aria: a.getAttribute('aria-label') || '',
-                title: a.getAttribute('title') || ''
-            }))
+            els => els.map(a => {
+
+                let parent = a.parentElement;
+
+                let levels = [];
+
+                for (let i = 0; i < 6 && parent; i++) {
+
+                    levels.push({
+                        tag: parent.tagName || '',
+                        cls: parent.className || '',
+                        text: (parent.innerText || '').trim()
+                    });
+
+                    parent = parent.parentElement;
+                }
+
+                return {
+
+                    text:
+                        (a.innerText || a.textContent || '').trim(),
+
+                    href:
+                        a.href || '',
+
+                    aria:
+                        a.getAttribute('aria-label') || '',
+
+                    title:
+                        a.getAttribute('title') || '',
+
+                    parents:
+                        levels
+                };
+            })
             """
         )
 
         browser.close()
 
+
     return {
         "url": final_url,
         "html": html,
         "text": visible_text,
-        "links": links,
+        "elements": elements,
     }
 
 
 # =========================================================
-# MAKE DETECTION
+# MAKE
 # =========================================================
 
 def infer_make(
@@ -543,7 +705,11 @@ def infer_make(
 ):
 
     if clean(manual_make):
-        return clean(manual_make)
+
+        return clean(
+            manual_make
+        )
+
 
     host = (
         urlparse(url)
@@ -552,41 +718,17 @@ def infer_make(
         .replace("www.", "")
     )
 
-    title = clean(
-        soup.title.get_text(
-            " ",
-            strip=True
-        )
-        if soup.title
-        else ""
-    )
-
-    site_name = ""
-
-    meta = soup.find(
-        "meta",
-        attrs={
-            "property": "og:site_name"
-        }
-    )
-
-    if meta:
-        site_name = clean(
-            meta.get(
-                "content",
-                ""
-            )
-        )
-
-    # -----------------------------------------------------
-    # Priority 1: domain
-    # -----------------------------------------------------
 
     compact_host = re.sub(
         r"[^a-z0-9]",
         "",
         host
     )
+
+
+    # -----------------------------------------------
+    # DOMAIN FIRST
+    # -----------------------------------------------
 
     for brand in sorted(
         BRANDS,
@@ -601,45 +743,23 @@ def infer_make(
         )
 
         if compact_brand in compact_host:
+
             return brand
 
-    # -----------------------------------------------------
-    # Priority 2: title / site name
-    # Exact word boundaries
-    # -----------------------------------------------------
 
-    header_text = (
-        title
-        + " "
-        + site_name
+    # -----------------------------------------------
+    # TITLE
+    # -----------------------------------------------
+
+    title = clean(
+        soup.title.get_text(
+            " ",
+            strip=True
+        )
+        if soup.title
+        else ""
     )
 
-    for brand in sorted(
-        BRANDS,
-        key=len,
-        reverse=True
-    ):
-
-        pattern = (
-            r"(?<![A-Za-z0-9])"
-            + re.escape(brand)
-            + r"(?![A-Za-z0-9])"
-        )
-
-        if re.search(
-            pattern,
-            header_text,
-            re.I
-        ):
-            return brand
-
-    # -----------------------------------------------------
-    # Priority 3: first part of visible page
-    # -----------------------------------------------------
-
-    first_text = clean(
-        visible_text
-    )[:2500]
 
     for brand in sorted(
         BRANDS,
@@ -655,10 +775,44 @@ def infer_make(
 
         if re.search(
             pattern,
-            first_text,
+            title,
             re.I
         ):
+
             return brand
+
+
+    # -----------------------------------------------
+    # PAGE START
+    # -----------------------------------------------
+
+    page_start = (
+        clean(
+            visible_text
+        )[:2000]
+    )
+
+
+    for brand in sorted(
+        BRANDS,
+        key=len,
+        reverse=True
+    ):
+
+        pattern = (
+            r"(?<![A-Za-z0-9])"
+            + re.escape(brand)
+            + r"(?![A-Za-z0-9])"
+        )
+
+        if re.search(
+            pattern,
+            page_start,
+            re.I
+        ):
+
+            return brand
+
 
     return (
         host
@@ -669,159 +823,38 @@ def infer_make(
 
 
 # =========================================================
-# URL → POSSIBLE MODEL
-# =========================================================
-
-def pretty_slug(slug):
-
-    slug = unquote(slug)
-
-    slug = re.sub(
-        r"[-_]+",
-        " ",
-        slug
-    )
-
-    slug = clean(slug)
-
-    words = []
-
-    for word in slug.split():
-
-        if (
-            re.search(r"\d", word)
-            or
-            len(word) <= 3
-        ):
-            words.append(
-                word.upper()
-            )
-        else:
-            words.append(
-                word.title()
-            )
-
-    return " ".join(words)
-
-
-def model_from_url(url):
-
-    path = (
-        urlparse(url)
-        .path
-        .strip("/")
-    )
-
-    parts = [
-        p
-        for p in path.split("/")
-        if p
-    ]
-
-    if not parts:
-        return ""
-
-    bad = {
-        "en",
-        "ar",
-        "sa",
-        "qa",
-        "ksa",
-        "vehicles",
-        "vehicle",
-        "models",
-        "model",
-        "cars",
-        "car",
-        "new-cars",
-        "new-vehicles",
-        "all-models",
-        "all-vehicles",
-        "main.html",
-        "index.html",
-    }
-
-    lower_parts = [
-        p.lower()
-        for p in parts
-    ]
-
-    route_words = [
-        "vehicles",
-        "vehicle",
-        "models",
-        "model",
-        "cars",
-        "car",
-    ]
-
-    for route in route_words:
-
-        if route in lower_parts:
-
-            i = lower_parts.index(
-                route
-            )
-
-            if i + 1 < len(parts):
-
-                candidate = (
-                    parts[i + 1]
-                )
-
-                if (
-                    candidate.lower()
-                    not in bad
-                ):
-
-                    return pretty_slug(
-                        candidate
-                    )
-
-    candidate = parts[-1]
-
-    if (
-        candidate.lower()
-        not in bad
-        and
-        "." not in candidate
-    ):
-
-        return pretty_slug(
-            candidate
-        )
-
-    return ""
-
-
-# =========================================================
-# MODEL CLEANING
+# MODEL NAME
 # =========================================================
 
 def clean_model_name(
     name,
-    make,
+    make
 ):
 
     name = clean(name)
 
+
+    # Remove line after From SAR etc.
+    name = re.sub(
+        r"\bfrom\s+(?:sar|aed|qar|usd).*$",
+        "",
+        name,
+        flags=re.I
+    )
+
+
     # Remove CTA
-    for word in [
-        "Learn More",
-        "Explore",
-        "Discover",
-        "View Details",
-        "Overview",
-    ]:
+    for cta in CTA_WORDS:
 
         name = re.sub(
-            re.escape(word),
+            re.escape(cta),
             "",
             name,
             flags=re.I
         )
 
-    # Remove "The Kia"
+
+    # Remove The
     name = re.sub(
         r"^the\s+",
         "",
@@ -829,6 +862,8 @@ def clean_model_name(
         flags=re.I
     )
 
+
+    # Remove Make prefix
     name = re.sub(
         r"^"
         + re.escape(make)
@@ -838,47 +873,38 @@ def clean_model_name(
         flags=re.I
     )
 
-    # Remove price text
-    name = re.sub(
-        r"\bfrom\b.*$",
-        "",
-        name,
-        flags=re.I
+
+    return clean(
+        name
     )
-
-    name = clean(name)
-
-    return name
 
 
 def plausible_model(
     name,
-    make,
+    make
 ):
 
-    name = clean_model_name(
-        name,
-        make
+    name = (
+        clean_model_name(
+            name,
+            make
+        )
     )
 
     if not name:
         return False
 
-    if name.lower() in NOISE:
-        return False
+    lower = (
+        name.lower()
+    )
 
-    if len(name) > 45:
+    if lower in NOISE:
         return False
 
     if len(name) < 2:
         return False
 
-    if name.lower().startswith(
-        (
-            "http",
-            "www.",
-        )
-    ):
+    if len(name) > 40:
         return False
 
     if re.fullmatch(
@@ -887,28 +913,9 @@ def plausible_model(
     ):
         return False
 
-    bad_phrases = [
-        "vat included",
-        "request",
-        "contact",
-        "service",
-        "accessories",
-        "shopping tools",
-        "customer",
-        "finance",
-        "warranty",
-        "cookie",
-        "privacy",
-        "terms",
-        "country",
-        "language",
-    ]
-
-    lower = name.lower()
-
     if any(
         phrase in lower
-        for phrase in bad_phrases
+        for phrase in BAD_PHRASES
     ):
         return False
 
@@ -916,35 +923,124 @@ def plausible_model(
 
 
 # =========================================================
-# DISCOVER MODELS
+# EXTRACT MODEL NAME FROM CARD TEXT
+# =========================================================
+
+def model_from_card_text(
+    text,
+    make
+):
+
+    text = clean(text)
+
+    if not text:
+        return ""
+
+
+    # Split card into lines
+    raw_lines = re.split(
+        r"[\n\r]+",
+        str(text)
+    )
+
+
+    lines = []
+
+    for line in raw_lines:
+
+        line = clean(line)
+
+        if not line:
+            continue
+
+        lower = (
+            line.lower()
+        )
+
+        if lower in NOISE:
+            continue
+
+        if lower.startswith(
+            "from "
+        ):
+            continue
+
+        if "vat included" in lower:
+            continue
+
+        if lower in [
+            "ice",
+            "hev",
+            "phev",
+            "bev",
+            "ev",
+            "hybrid",
+            "electric",
+            "diesel",
+            "gasoline",
+            "petrol",
+        ]:
+            continue
+
+        if plausible_model(
+            line,
+            make
+        ):
+
+            lines.append(
+                clean_model_name(
+                    line,
+                    make
+                )
+            )
+
+
+    if not lines:
+        return ""
+
+
+    # First sensible short line
+    return lines[0]
+
+
+# =========================================================
+# FIND MODEL CARDS
 # =========================================================
 
 def discover_models(
     rendered,
-    make,
+    make
 ):
 
-    base_url = rendered["url"]
-    html = rendered["html"]
-    links = rendered["links"]
+    base_url = (
+        rendered["url"]
+    )
 
-    soup = BeautifulSoup(
-        html,
-        "html.parser"
+    elements = (
+        rendered["elements"]
     )
 
     rows = []
 
 
-    # -----------------------------------------------------
-    # METHOD 1:
-    # Browser-rendered links
-    # -----------------------------------------------------
+    # =====================================================
+    # METHOD 1
+    # CTA link → walk UP parents → find model card
+    #
+    # This is the main V5 fix.
+    # =====================================================
 
-    for item in links:
+    for element in elements:
+
+        link_text = clean(
+            element.get(
+                "text",
+                ""
+            )
+        )
 
         href = clean(
-            item.get(
+            element.get(
                 "href",
                 ""
             )
@@ -953,32 +1049,129 @@ def discover_models(
         if not href:
             continue
 
+
+        lower_link = (
+            link_text.lower()
+        )
+
+
+        is_cta = (
+            lower_link
+            in CTA_WORDS
+        )
+
+
+        if not is_cta:
+            continue
+
+
         if not same_domain(
             base_url,
             href
         ):
             continue
 
+
+        parents = (
+            element.get(
+                "parents",
+                []
+            )
+        )
+
+
+        candidate = ""
+
+
+        # Walk from nearest parent outward
+        for parent in parents:
+
+            parent_text = clean(
+                parent.get(
+                    "text",
+                    ""
+                )
+            )
+
+            if not parent_text:
+                continue
+
+            # Avoid giant containers
+            if len(parent_text) > 600:
+                continue
+
+
+            possible = (
+                model_from_card_text(
+                    parent_text,
+                    make
+                )
+            )
+
+
+            if plausible_model(
+                possible,
+                make
+            ):
+
+                candidate = (
+                    possible
+                )
+
+                break
+
+
+        if candidate:
+
+            rows.append(
+                {
+                    "Make":
+                    make,
+
+                    "Model":
+                    candidate,
+
+                    "Model URL":
+                    href,
+
+                    "Detected From":
+                    "Model Card + CTA",
+                }
+            )
+
+
+    # =====================================================
+    # METHOD 2
+    # Model-looking URLs
+    # =====================================================
+
+    for element in elements:
+
+        href = clean(
+            element.get(
+                "href",
+                ""
+            )
+        )
+
         text = clean(
-            item.get(
+            element.get(
                 "text",
                 ""
             )
         )
 
-        aria = clean(
-            item.get(
-                "aria",
-                ""
-            )
-        )
 
-        title = clean(
-            item.get(
-                "title",
-                ""
-            )
-        )
+        if not href:
+            continue
+
+
+        if not same_domain(
+            base_url,
+            href
+        ):
+            continue
+
 
         path = (
             urlparse(href)
@@ -986,391 +1179,114 @@ def discover_models(
             .lower()
         )
 
-        url_signal = any(
-            token in path
-            for token in [
-                "/vehicle/",
+
+        model_route = any(
+            route in path
+            for route in [
                 "/vehicles/",
-                "/model/",
+                "/vehicle/",
                 "/models/",
-                "/car/",
+                "/model/",
                 "/cars/",
+                "/car/",
             ]
         )
 
-        text_signal = (
-            plausible_model(
+
+        if not model_route:
+            continue
+
+
+        candidate = (
+            clean_model_name(
                 text,
                 make
             )
-            and
-            any(
-                keyword
-                in (
-                    text
-                    + " "
-                    + aria
-                    + " "
-                    + title
-                ).lower()
-                for keyword
-                in SECTION_WORDS
-            )
         )
 
-        if (
-            text.lower() in NOISE
-            or
-            not text
+
+        if not plausible_model(
+            candidate,
+            make
         ):
 
-            candidate = (
-                model_from_url(
+            # URL fallback
+            parts = [
+                p
+                for p
+                in urlparse(
                     href
+                ).path
+                .strip("/")
+                .split("/")
+                if p
+            ]
+
+
+            if parts:
+
+                candidate = (
+                    unquote(
+                        parts[-1]
+                    )
+                    .replace(
+                        "-",
+                        " "
+                    )
+                    .replace(
+                        "_",
+                        " "
+                    )
                 )
-            )
 
-            source = (
-                "Rendered URL"
-            )
-
-        else:
-
-            candidate = (
-                clean_model_name(
-                    text,
-                    make
+                candidate = clean(
+                    candidate
                 )
-            )
 
-            source = (
-                "Rendered Link"
-            )
-
-        # URL itself looks like model route
-        if (
-            url_signal
-            and
-            not plausible_model(
-                candidate,
-                make
-            )
-        ):
-
-            candidate = (
-                model_from_url(
-                    href
+                candidate = " ".join(
+                    word.upper()
+                    if (
+                        re.search(
+                            r"\d",
+                            word
+                        )
+                        or
+                        len(word) <= 3
+                    )
+                    else
+                    word.title()
+                    for word
+                    in candidate.split()
                 )
-            )
 
-            source = (
-                "Rendered URL"
-            )
 
-        if (
-            url_signal
-            and
-            plausible_model(
-                candidate,
-                make
-            )
+        if plausible_model(
+            candidate,
+            make
         ):
 
             rows.append(
                 {
-                    "Make": make,
-                    "Model": candidate,
-                    "Model URL": href,
-                    "Detected From": source,
+                    "Make":
+                    make,
+
+                    "Model":
+                    candidate,
+
+                    "Model URL":
+                    href,
+
+                    "Detected From":
+                    "Model URL",
                 }
             )
 
 
-    # -----------------------------------------------------
-    # METHOD 2:
-    # Rendered headings
-    # -----------------------------------------------------
+    # =====================================================
+    # CLEAN
+    # =====================================================
 
-    for heading in soup.find_all(
-        re.compile(
-            "^h[1-6]$"
-        )
-    ):
-
-        text = clean(
-            heading.get_text(
-                " ",
-                strip=True
-            )
-        )
-
-        if not text:
-            continue
-
-        # The Kia K4
-        # Kia K8
-        pattern = (
-            r"^(?:the\s+)?"
-            + re.escape(make)
-            + r"\s+(.+)$"
-        )
-
-        match = re.match(
-            pattern,
-            text,
-            re.I
-        )
-
-        if match:
-
-            candidate = (
-                clean_model_name(
-                    match.group(1),
-                    make
-                )
-            )
-
-            if plausible_model(
-                candidate,
-                make
-            ):
-
-                parent = heading.parent
-
-                nearby = None
-
-                if parent:
-                    nearby = (
-                        parent.find(
-                            "a",
-                            href=True
-                        )
-                    )
-
-                model_url = (
-                    urljoin(
-                        base_url,
-                        nearby["href"]
-                    )
-                    if nearby
-                    else base_url
-                )
-
-                rows.append(
-                    {
-                        "Make": make,
-                        "Model": candidate,
-                        "Model URL": model_url,
-                        "Detected From": "Heading",
-                    }
-                )
-
-
-    # -----------------------------------------------------
-    # METHOD 3:
-    # Cards - short text around Learn More
-    # -----------------------------------------------------
-
-    for link in soup.find_all(
-        "a",
-        href=True
-    ):
-
-        link_text = clean(
-            link.get_text(
-                " ",
-                strip=True
-            )
-        ).lower()
-
-        if link_text not in {
-            "learn more",
-            "discover",
-            "explore",
-            "view details",
-            "details",
-        }:
-            continue
-
-        parent = link
-
-        for _ in range(4):
-
-            parent = (
-                parent.parent
-                if parent
-                else None
-            )
-
-            if not parent:
-                break
-
-            text = clean(
-                parent.get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            # Look for short first line / heading
-            heading = parent.find(
-                [
-                    "h2",
-                    "h3",
-                    "h4",
-                    "h5",
-                    "strong",
-                ]
-            )
-
-            if heading:
-
-                candidate = (
-                    clean_model_name(
-                        heading.get_text(
-                            " ",
-                            strip=True
-                        ),
-                        make
-                    )
-                )
-
-                if plausible_model(
-                    candidate,
-                    make
-                ):
-
-                    rows.append(
-                        {
-                            "Make": make,
-                            "Model": candidate,
-                            "Model URL": urljoin(
-                                base_url,
-                                link["href"]
-                            ),
-                            "Detected From": "Rendered Card",
-                        }
-                    )
-
-                    break
-
-
-    # -----------------------------------------------------
-    # METHOD 4:
-    # JSON-LD
-    # -----------------------------------------------------
-
-    for script in soup.find_all(
-        "script",
-        type="application/ld+json"
-    ):
-
-        try:
-            data = json.loads(
-                script.string or ""
-            )
-        except Exception:
-            continue
-
-        stack = (
-            data
-            if isinstance(data, list)
-            else [data]
-        )
-
-        while stack:
-
-            item = stack.pop()
-
-            if isinstance(
-                item,
-                dict
-            ):
-
-                item_type = str(
-                    item.get(
-                        "@type",
-                        ""
-                    )
-                ).lower()
-
-                if any(
-                    x in item_type
-                    for x in [
-                        "vehicle",
-                        "car",
-                        "product",
-                    ]
-                ):
-
-                    candidate = (
-                        clean_model_name(
-                            item.get(
-                                "name",
-                                ""
-                            ),
-                            make
-                        )
-                    )
-
-                    if plausible_model(
-                        candidate,
-                        make
-                    ):
-
-                        model_url = (
-                            urljoin(
-                                base_url,
-                                clean(
-                                    item.get(
-                                        "url",
-                                        ""
-                                    )
-                                )
-                            )
-                            or base_url
-                        )
-
-                        rows.append(
-                            {
-                                "Make": make,
-                                "Model": candidate,
-                                "Model URL": model_url,
-                                "Detected From": "JSON-LD",
-                            }
-                        )
-
-                for value in (
-                    item.values()
-                ):
-
-                    if isinstance(
-                        value,
-                        (dict, list)
-                    ):
-                        stack.append(
-                            value
-                        )
-
-            elif isinstance(
-                item,
-                list
-            ):
-
-                stack.extend(
-                    item
-                )
-
-
-    # -----------------------------------------------------
-    # CLEAN RESULTS
-    # -----------------------------------------------------
-
-    df = pd.DataFrame(
-        rows
-    )
-
-    if df.empty:
+    if not rows:
 
         return pd.DataFrame(
             columns=[
@@ -1381,9 +1297,14 @@ def discover_models(
             ]
         )
 
+
+    df = pd.DataFrame(
+        rows
+    )
+
+
     df["Model"] = (
         df["Model"]
-        .astype(str)
         .map(
             lambda x:
             clean_model_name(
@@ -1393,8 +1314,11 @@ def discover_models(
         )
     )
 
+
     df = df[
-        df["Model"].map(
+        df[
+            "Model"
+        ].map(
             lambda x:
             plausible_model(
                 x,
@@ -1403,12 +1327,51 @@ def discover_models(
         )
     ]
 
-    # Prefer a real unique URL
+
+    # Remove homepage pretending to be model page
+    home_path = (
+        urlparse(
+            base_url
+        ).path.rstrip("/")
+    )
+
+
+    def real_model_url(url):
+
+        path = (
+            urlparse(
+                url
+            ).path.rstrip("/")
+        )
+
+        if (
+            url == base_url
+            or
+            path == home_path
+        ):
+            return False
+
+        return True
+
+
+    df["Has Model URL"] = (
+        df["Model URL"]
+        .map(
+            real_model_url
+        )
+    )
+
+
+    # Prefer records that have actual model URL
     df = (
         df.sort_values(
             [
                 "Model",
-                "Detected From",
+                "Has Model URL",
+            ],
+            ascending=[
+                True,
+                False,
             ]
         )
         .drop_duplicates(
@@ -1423,20 +1386,23 @@ def discover_models(
         )
     )
 
+
     return df
 
 
 # =========================================================
-# SPEC HELPERS
+# SPEC FIELD MATCHING
 # =========================================================
 
 def canonical_field(
     label
 ):
 
-    label = clean(
-        label
-    ).lower()
+    label = (
+        clean(label)
+        .lower()
+    )
+
 
     for (
         field,
@@ -1450,19 +1416,31 @@ def canonical_field(
                 or
                 alias in label
             ):
+
                 return field
+
 
     return None
 
 
+# =========================================================
+# STRUCTURED SPEC PAIRS
+# =========================================================
+
 def add_pair(
     pairs,
     label,
-    value,
+    value
 ):
 
-    label = clean(label)
-    value = clean(value)
+    label = clean(
+        label
+    )
+
+    value = clean(
+        value
+    )
+
 
     if not label:
         return
@@ -1475,6 +1453,7 @@ def add_pair(
 
     if len(value) > 400:
         return
+
 
     pairs.append(
         (
@@ -1491,7 +1470,7 @@ def extract_pairs(
     pairs = []
 
 
-    # Tables
+    # TABLE
     for tr in soup.find_all(
         "tr"
     ):
@@ -1512,6 +1491,7 @@ def extract_pairs(
             )
         ]
 
+
         if len(cells) >= 2:
 
             add_pair(
@@ -1523,7 +1503,7 @@ def extract_pairs(
             )
 
 
-    # Definition lists
+    # DT DD
     for dt in soup.find_all(
         "dt"
     ):
@@ -1533,6 +1513,7 @@ def extract_pairs(
                 "dd"
             )
         )
+
 
         if dd:
 
@@ -1549,50 +1530,7 @@ def extract_pairs(
             )
 
 
-    # Common sibling label/value layouts
-    for element in soup.find_all(
-        [
-            "div",
-            "li",
-            "p",
-            "span",
-        ]
-    ):
-
-        children = element.find_all(
-            recursive=False
-        )
-
-        if len(children) == 2:
-
-            label = clean(
-                children[0].get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            value = clean(
-                children[1].get_text(
-                    " ",
-                    strip=True
-                )
-            )
-
-            if (
-                len(label) <= 80
-                and
-                len(value) <= 300
-            ):
-
-                add_pair(
-                    pairs,
-                    label,
-                    value
-                )
-
-
-    # Label: value
+    # Label : Value
     for element in soup.find_all(
         [
             "li",
@@ -1608,8 +1546,11 @@ def extract_pairs(
             )
         )
 
+
         if (
-            4 <= len(text) <= 250
+            4
+            <= len(text)
+            <= 250
         ):
 
             match = re.match(
@@ -1619,6 +1560,7 @@ def extract_pairs(
                 text
             )
 
+
             if match:
 
                 add_pair(
@@ -1627,31 +1569,85 @@ def extract_pairs(
                     match.group(2)
                 )
 
+
+    # TWO CHILDREN
+    for element in soup.find_all(
+        [
+            "div",
+            "li",
+        ]
+    ):
+
+        children = (
+            element.find_all(
+                recursive=False
+            )
+        )
+
+
+        if len(children) == 2:
+
+            label = clean(
+                children[0]
+                .get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+            value = clean(
+                children[1]
+                .get_text(
+                    " ",
+                    strip=True
+                )
+            )
+
+
+            if (
+                len(label) <= 80
+                and
+                len(value) <= 300
+            ):
+
+                add_pair(
+                    pairs,
+                    label,
+                    value
+                )
+
+
     return pairs
 
 
 # =========================================================
-# REGEX FALLBACK SPECS
+# FALLBACK SPEC PATTERNS
 # =========================================================
 
 FALLBACKS = {
 
     "Displacement": [
-        r"(?i)\b([0-9.]+\s*(?:cc|cm3|cm³))\b",
-        r"(?i)\b([0-9.]+\s*(?:l|litre|liter))\s+(?:engine)\b",
+
+        r"(?i)\b([0-9,]+\s*cc)\b",
+
+        r"(?i)\b([0-9.]+\s*(?:l|liter|litre))\s+engine\b",
+
     ],
 
     "Max Power": [
+
         (
             r"(?i)"
-            r"(?:maximum|max\.?|engine|motor)?\s*"
+            r"(?:maximum|max\.?)?\s*"
             r"(?:power|output|horsepower)"
             r"\s*[:\-]?\s*"
             r"([0-9.,]+\s*(?:hp|bhp|ps|kw))"
         ),
+
     ],
 
     "Max Torque": [
+
         (
             r"(?i)"
             r"(?:maximum|max\.?)?\s*"
@@ -1659,22 +1655,28 @@ FALLBACKS = {
             r"\s*[:\-]?\s*"
             r"([0-9.,]+\s*(?:nm|n\.m))"
         ),
+
     ],
 
     "Drivetrain": [
+
         r"(?i)\b(FWD|RWD|AWD|4WD|4X4|2WD)\b",
+
     ],
 
     "Battery Capacity": [
+
         (
             r"(?i)"
             r"(?:battery(?:\s+capacity|\s+pack|\s+size)?)"
             r"\s*[:\-]?\s*"
             r"([0-9.,]+\s*kwh)"
         ),
+
     ],
 
     "Electric Range": [
+
         (
             r"(?i)"
             r"(?:electric|ev|driving|wltp|nedc)?"
@@ -1682,29 +1684,26 @@ FALLBACKS = {
             r"\s*[:\-]?\s*"
             r"([0-9.,]+\s*km)"
         ),
+
     ],
 
     "Fuel Economy": [
-        r"(?i)\b([0-9.,]+\s*km\s*/\s*l)\b",
-        r"(?i)\b([0-9.,]+\s*l\s*/\s*100\s*km)\b",
-    ],
 
-    "Acceleration": [
-        (
-            r"(?i)"
-            r"(?:0\s*(?:-|–|to)\s*100\s*km/?h)"
-            r"\s*[:\-]?\s*"
-            r"([0-9.]+\s*(?:s|sec|seconds))"
-        ),
+        r"(?i)\b([0-9.,]+\s*km\s*/\s*l)\b",
+
+        r"(?i)\b([0-9.,]+\s*l\s*/\s*100\s*km)\b",
+
     ],
 
     "Top Speed": [
+
         (
             r"(?i)"
             r"(?:top|max(?:imum)?\s+speed)"
             r"\s*[:\-]?\s*"
             r"([0-9.,]+\s*km/?h)"
         ),
+
     ],
 }
 
@@ -1721,28 +1720,41 @@ def inspect_model(
 
     try:
 
-        rendered = render_page(
-            model_url,
-            wait_ms=3000
+        rendered = (
+            render_page(
+                model_url,
+                wait_ms=3000
+            )
         )
 
-        soup = BeautifulSoup(
-            rendered["html"],
-            "html.parser"
+
+        soup = (
+            BeautifulSoup(
+                rendered["html"],
+                "html.parser"
+            )
         )
+
 
         result = {
-            "Make": make,
-            "Model": model,
-            "Source URL": rendered["url"],
+
+            "Make":
+            make,
+
+            "Model":
+            model,
+
+            "Source URL":
+            rendered["url"],
         }
 
-        raw_specs = []
+
+        raw = []
 
 
-        # -------------------------------------------------
-        # Structured specs
-        # -------------------------------------------------
+        # -----------------------------------------------
+        # STRUCTURED SPECS
+        # -----------------------------------------------
 
         for (
             label,
@@ -1751,9 +1763,12 @@ def inspect_model(
             soup
         ):
 
-            field = canonical_field(
-                label
+            field = (
+                canonical_field(
+                    label
+                )
             )
+
 
             if field:
 
@@ -1765,18 +1780,26 @@ def inspect_model(
                         field
                     ] = value
 
-                raw_specs.append(
+
+                raw.append(
                     f"{label}: {value}"
                 )
 
 
-        # -------------------------------------------------
-        # Visible browser text fallback
-        # -------------------------------------------------
+        # -----------------------------------------------
+        # VISIBLE TEXT
+        # -----------------------------------------------
 
         text = clean(
-            rendered["text"]
+            rendered[
+                "text"
+            ]
         )
+
+
+        # -----------------------------------------------
+        # FALLBACK
+        # -----------------------------------------------
 
         for (
             field,
@@ -1788,12 +1811,14 @@ def inspect_model(
             ):
                 continue
 
+
             for pattern in patterns:
 
                 match = re.search(
                     pattern,
                     text
                 )
+
 
                 if match:
 
@@ -1806,30 +1831,41 @@ def inspect_model(
                     break
 
 
-        # -------------------------------------------------
-        # Transmission fallback
-        # -------------------------------------------------
+        # -----------------------------------------------
+        # TRANSMISSION
+        # -----------------------------------------------
 
         if not result.get(
             "Transmission"
         ):
 
-            transmission_patterns = [
+            patterns = [
+
                 r"(?i)\b([0-9]+[- ]speed automatic)\b",
+
                 r"(?i)\b([0-9]+[- ]speed manual)\b",
+
+                r"(?i)\b([0-9]+[- ]speed DCT)\b",
+
                 r"(?i)\b(CVT)\b",
+
                 r"(?i)\b(e-CVT)\b",
+
                 r"(?i)\b(DCT)\b",
+
                 r"(?i)\b(automatic transmission)\b",
+
                 r"(?i)\b(manual transmission)\b",
             ]
 
-            for pattern in transmission_patterns:
+
+            for pattern in patterns:
 
                 match = re.search(
                     pattern,
                     text
                 )
+
 
                 if match:
 
@@ -1842,15 +1878,16 @@ def inspect_model(
                     break
 
 
-        # -------------------------------------------------
-        # Fuel / powertrain fallback
-        # -------------------------------------------------
+        # -----------------------------------------------
+        # POWERTRAIN
+        # -----------------------------------------------
 
         if not result.get(
             "Fuel / Powertrain"
         ):
 
-            powertrain_words = [
+            options = [
+
                 "Plug-in Hybrid",
                 "PHEV",
                 "Hybrid",
@@ -1861,23 +1898,29 @@ def inspect_model(
                 "Diesel",
                 "Gasoline",
                 "Petrol",
+
             ]
+
 
             found = []
 
-            for word in powertrain_words:
+
+            for option in options:
 
                 if re.search(
                     r"\b"
-                    + re.escape(word)
+                    + re.escape(
+                        option
+                    )
                     + r"\b",
                     text,
                     re.I
                 ):
 
                     found.append(
-                        word
+                        option
                     )
+
 
             if found:
 
@@ -1890,15 +1933,12 @@ def inspect_model(
                 )
 
 
-        # -------------------------------------------------
-        # Keep raw matched specs for researcher review
-        # -------------------------------------------------
-
         result[
             "Raw Matched Specs"
         ] = " ; ".join(
-            raw_specs[:120]
+            raw[:120]
         )
+
 
         return result
 
@@ -1906,10 +1946,18 @@ def inspect_model(
     except Exception as error:
 
         return {
-            "Make": make,
-            "Model": model,
-            "Source URL": model_url,
-            "Error": str(error),
+
+            "Make":
+            make,
+
+            "Model":
+            model,
+
+            "Source URL":
+            model_url,
+
+            "Error":
+            str(error),
         }
 
 
@@ -1920,21 +1968,26 @@ def inspect_model(
 def create_excel(
     models_df,
     specs_df,
-    source_url,
+    source_url
 ):
 
-    output = io.BytesIO()
+    output = (
+        io.BytesIO()
+    )
+
 
     with pd.ExcelWriter(
         output,
         engine="openpyxl"
     ) as writer:
 
+
         models_df.to_excel(
             writer,
             index=False,
-            sheet_name="Models",
+            sheet_name="Models"
         )
+
 
         if (
             specs_df is not None
@@ -1945,10 +1998,11 @@ def create_excel(
             specs_df.to_excel(
                 writer,
                 index=False,
-                sheet_name="Specs",
+                sheet_name="Specs"
             )
 
-        methodology = pd.DataFrame(
+
+        pd.DataFrame(
             [
                 {
                     "Source URL":
@@ -1956,44 +2010,51 @@ def create_excel(
 
                     "Method":
                     (
-                        "Browser-rendered extraction "
-                        "using Playwright."
+                        "Browser-rendered model card "
+                        "and specification extraction."
                     ),
 
                     "Rule":
                     (
-                        "Display only fields detected "
-                        "on the source page. "
-                        "Missing fields remain blank. "
-                        "No values are invented."
+                        "Only fields detected on "
+                        "the source are displayed. "
+                        "Missing values remain blank."
                     ),
                 }
             ]
-        )
-
-        methodology.to_excel(
+        ).to_excel(
             writer,
             index=False,
-            sheet_name="Methodology",
+            sheet_name="Methodology"
         )
 
-    return output.getvalue()
+
+    return (
+        output.getvalue()
+    )
 
 
 # =========================================================
 # SIDEBAR
 # =========================================================
 
-manual_make = st.sidebar.text_input(
-    "Make (optional)",
-    placeholder="Auto-detect if blank",
+manual_make = (
+    st.sidebar.text_input(
+        "Make (optional)",
+        placeholder=(
+            "Auto-detect if blank"
+        )
+    )
 )
 
-max_pages = st.sidebar.slider(
-    "Max model pages for spec scan",
-    min_value=1,
-    max_value=50,
-    value=10,
+
+max_pages = (
+    st.sidebar.slider(
+        "Max model pages for spec scan",
+        min_value=1,
+        max_value=50,
+        value=10,
+    )
 )
 
 
@@ -2005,12 +2066,12 @@ url = st.text_input(
     "Website URL",
     placeholder=(
         "https://www.kia.com/sa/en/main.html"
-    ),
+    )
 )
 
 
 # =========================================================
-# CHECK WEBSITE
+# CHECK
 # =========================================================
 
 if st.button(
@@ -2022,66 +2083,94 @@ if st.button(
     if not clean(url):
 
         st.error(
-            "Please enter a website URL."
+            "Enter a website URL."
         )
 
         st.stop()
 
+
     try:
 
         with st.spinner(
-            "Opening website in browser and waiting for JavaScript..."
+            "Opening website, loading JavaScript and reading model cards..."
         ):
 
-            rendered = render_page(
-                normalize_url(
-                    url
+            rendered = (
+                render_page(
+                    normalize_url(
+                        url
+                    )
                 )
             )
 
-            soup = BeautifulSoup(
-                rendered["html"],
-                "html.parser"
+
+            soup = (
+                BeautifulSoup(
+                    rendered[
+                        "html"
+                    ],
+                    "html.parser"
+                )
             )
 
-            make = infer_make(
-                soup,
-                rendered["url"],
-                rendered["text"],
-                manual_make,
+
+            make = (
+                infer_make(
+                    soup,
+                    rendered[
+                        "url"
+                    ],
+                    rendered[
+                        "text"
+                    ],
+                    manual_make,
+                )
             )
 
-            models_df = discover_models(
-                rendered,
-                make,
+
+            models_df = (
+                discover_models(
+                    rendered,
+                    make
+                )
             )
+
 
             st.session_state[
                 "models"
             ] = models_df
 
+
             st.session_state[
                 "make"
             ] = make
 
+
             st.session_state[
                 "source"
-            ] = rendered["url"]
+            ] = rendered[
+                "url"
+            ]
+
 
             st.session_state[
                 "specdf"
             ] = pd.DataFrame()
 
+
             st.session_state[
-                "page_text_length"
+                "text_length"
             ] = len(
-                rendered["text"]
+                rendered[
+                    "text"
+                ]
             )
+
 
     except Exception as error:
 
         st.error(
-            "Browser error:"
+            "Browser error"
         )
 
         st.code(
@@ -2090,7 +2179,7 @@ if st.button(
 
 
 # =========================================================
-# RESULTS
+# MODEL RESULTS
 # =========================================================
 
 if "models" in st.session_state:
@@ -2101,9 +2190,11 @@ if "models" in st.session_state:
         ]
     )
 
-    c1, c2, c3 = st.columns(
-        3
+
+    c1, c2, c3 = (
+        st.columns(3)
     )
+
 
     c1.metric(
         "Make",
@@ -2113,6 +2204,7 @@ if "models" in st.session_state:
         )
     )
 
+
     c2.metric(
         "Models found",
         len(
@@ -2120,9 +2212,23 @@ if "models" in st.session_state:
         )
     )
 
+
+    if not models_df.empty:
+
+        valid_urls = int(
+            models_df[
+                "Has Model URL"
+            ].sum()
+        )
+
+    else:
+
+        valid_urls = 0
+
+
     c3.metric(
-        "Rendered text",
-        f"{st.session_state.get('page_text_length', 0):,} chars"
+        "Models with URL",
+        valid_urls
     )
 
 
@@ -2134,48 +2240,51 @@ if "models" in st.session_state:
     if models_df.empty:
 
         st.warning(
-            "The browser loaded the website, "
-            "but no reliable model candidates were found."
-        )
-
-        st.info(
-            "This may mean the model list is inside "
-            "a special menu, iframe, API, or requires "
-            "another site-specific discovery method."
+            "No reliable model cards found."
         )
 
 
     else:
 
-        editable_df = (
+        editable = (
             models_df.assign(
                 Inspect=False
             )
         )
 
-        edited = st.data_editor(
-            editable_df,
-            hide_index=True,
-            use_container_width=True,
 
-            column_config={
-                "Inspect":
-                st.column_config.CheckboxColumn(
-                    "Inspect specs"
-                ),
-            },
+        edited = (
+            st.data_editor(
+                editable,
+                hide_index=True,
+                use_container_width=True,
 
-            disabled=[
-                "Make",
-                "Model",
-                "Model URL",
-                "Detected From",
-            ],
+                column_config={
+
+                    "Inspect":
+                    st.column_config.CheckboxColumn(
+                        "Inspect specs"
+                    ),
+
+                    "Has Model URL":
+                    st.column_config.CheckboxColumn(
+                        "Valid URL"
+                    ),
+                },
+
+                disabled=[
+                    "Make",
+                    "Model",
+                    "Model URL",
+                    "Detected From",
+                    "Has Model URL",
+                ],
+            )
         )
 
 
         # =================================================
-        # SPEC SCAN
+        # INSPECT
         # =================================================
 
         if st.button(
@@ -2185,38 +2294,48 @@ if "models" in st.session_state:
 
             selected = (
                 edited[
-                    edited[
-                        "Inspect"
-                    ] == True
+                    (
+                        edited[
+                            "Inspect"
+                        ] == True
+                    )
+                    &
+                    (
+                        edited[
+                            "Has Model URL"
+                        ] == True
+                    )
                 ]
                 .head(
                     max_pages
                 )
             )
 
+
             if selected.empty:
 
                 st.warning(
-                    "Select at least one model first."
+                    "Select at least one model "
+                    "that has a valid Model URL."
                 )
+
 
             else:
 
                 results = []
 
                 progress = (
-                    st.progress(
-                        0
-                    )
+                    st.progress(0)
                 )
 
                 status = (
                     st.empty()
                 )
 
-                total = len(
-                    selected
+                total = (
+                    len(selected)
                 )
+
 
                 for (
                     number,
@@ -2227,39 +2346,50 @@ if "models" in st.session_state:
                 ):
 
                     status.write(
-                        f"Reading {row['Make']} {row['Model']} "
+                        f"Reading "
+                        f"{row['Make']} "
+                        f"{row['Model']} "
                         f"({number}/{total})..."
                     )
 
-                    result = inspect_model(
-                        row[
-                            "Model URL"
-                        ],
-                        row[
-                            "Make"
-                        ],
-                        row[
-                            "Model"
-                        ],
+
+                    result = (
+                        inspect_model(
+                            row[
+                                "Model URL"
+                            ],
+                            row[
+                                "Make"
+                            ],
+                            row[
+                                "Model"
+                            ],
+                        )
                     )
+
 
                     results.append(
                         result
                     )
+
 
                     progress.progress(
                         number
                         / total
                     )
 
+
                 status.write(
                     "Finished."
                 )
 
+
                 st.session_state[
                     "specdf"
-                ] = pd.DataFrame(
-                    results
+                ] = (
+                    pd.DataFrame(
+                        results
+                    )
                 )
 
 
@@ -2267,10 +2397,13 @@ if "models" in st.session_state:
     # SPECS
     # =====================================================
 
-    specs_df = st.session_state.get(
-        "specdf",
-        pd.DataFrame()
+    specs_df = (
+        st.session_state.get(
+            "specdf",
+            pd.DataFrame()
+        )
     )
+
 
     if not specs_df.empty:
 
@@ -2278,10 +2411,13 @@ if "models" in st.session_state:
             "2. Specs found"
         )
 
-        # Only display columns that actually contain data
-        useful_columns = []
 
-        for column in specs_df.columns:
+        useful = []
+
+
+        for column in (
+            specs_df.columns
+        ):
 
             if column in [
                 "Make",
@@ -2290,29 +2426,33 @@ if "models" in st.session_state:
                 "Error",
             ]:
 
-                useful_columns.append(
+                useful.append(
                     column
                 )
 
                 continue
 
-            values = (
-                specs_df[column]
+
+            if (
+                specs_df[
+                    column
+                ]
                 .replace(
                     "",
                     pd.NA
                 )
-            )
+                .notna()
+                .any()
+            ):
 
-            if values.notna().any():
-
-                useful_columns.append(
+                useful.append(
                     column
                 )
 
+
         st.dataframe(
             specs_df[
-                useful_columns
+                useful
             ],
             hide_index=True,
             use_container_width=True,
@@ -2320,23 +2460,26 @@ if "models" in st.session_state:
 
 
     # =====================================================
-    # DOWNLOAD
+    # EXCEL
     # =====================================================
 
-    excel = create_excel(
-        models_df,
-        specs_df,
-        st.session_state.get(
-            "source",
-            ""
-        ),
+    excel_file = (
+        create_excel(
+            models_df,
+            specs_df,
+            st.session_state.get(
+                "source",
+                ""
+            ),
+        )
     )
+
 
     st.download_button(
         "⬇️ Download Excel",
-        data=excel,
+        data=excel_file,
         file_name=(
-            "automotive_web_research_v4.xlsx"
+            "automotive_web_research_v5.xlsx"
         ),
         mime=(
             "application/"
@@ -2352,8 +2495,8 @@ if "models" in st.session_state:
 # =========================================================
 
 st.info(
-    "V4 uses a real browser engine so JavaScript-loaded "
-    "vehicle lists can be read. Specs are flexible: "
-    "fields found on the source are shown; missing fields "
-    "are left blank."
+    "V5: model names are linked to their own vehicle cards. "
+    "Only models with a real model URL can be inspected. "
+    "Specs are flexible: available fields are shown; "
+    "missing fields remain blank."
 )

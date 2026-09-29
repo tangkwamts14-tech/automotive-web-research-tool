@@ -23,14 +23,7 @@ st.title("🚗 Automotive Website Research")
 st.caption(
     "Website URL → Models → Variants → Specifications → Excel"
 )
-st.success("App version: 2026-09-29 FIX-UI")
-
-# Render the URL field immediately so deployment can be verified visually.
-url = st.text_input(
-    "Website URL",
-    placeholder="https://www.kia.com/aljabr/en/main.html",
-    key="website_url_input",
-)
+st.success("App version: 2026-09-29 FULL-UI")
 
 
 # ============================================================
@@ -93,3 +86,11 @@ BAD_MODEL_PHRASES = [
 def clean(value):
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
+
+def normalize_url(url):
+    url = clean(url)
+
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    return url

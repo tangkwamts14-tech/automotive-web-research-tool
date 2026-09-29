@@ -1,715 +1,126 @@
 import io
 import re
-import json
-import shutil
-from urllib.parse import urljoin, urlparse, unquote
-
+import requests
 import pandas as pd
 import streamlit as st
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
-
-
-# =========================================================
-# PAGE
-# =========================================================
+from urllib.parse import urljoin, urlparse
 
 st.set_page_config(
-    page_title="Automotive Web Research Tool V5",
+    page_title="Automotive Website Research",
     page_icon="🚗",
-    layout="wide",
+    layout="wide"
 )
 
-st.title("🚗 Automotive Web Research Tool V5")
-
-st.caption(
-    "Browser → Make → Model Card → Model URL → Flexible Specs → Excel"
-)
+st.title("🚗 Automotive Website Research")
+st.caption("Paste an automotive website URL → Research → View data → Download Excel")
 
 
 # =========================================================
-# BRANDS
+# SETTINGS
 # =========================================================
 
-BRANDS = [
-    "Acura", "Alfa Romeo", "Aston Martin", "Audi",
-    "BAIC", "Bentley", "Bestune", "BMW", "BYD",
-    "Cadillac", "Changan", "Chery", "Chevrolet",
-    "Chrysler", "Denza", "Dodge", "Exeed", "FAW",
-    "Ferrari", "Fiat", "Ford", "Foton", "GAC",
-    "Geely", "Genesis", "GMC", "Great Wall",
-    "GWM", "Haval", "Honda", "Hongqi", "Hyundai",
-    "iCAUR", "Ineos", "Infiniti", "Isuzu", "JAC",
-    "Jaecoo", "Jaguar", "Jeep", "Jetour", "Kia",
-    "Lamborghini", "Land Rover", "Lexus", "Lincoln",
-    "Lotus", "Maserati", "Mazda", "McLaren",
-    "Mercedes-Benz", "MG", "MINI", "Mitsubishi",
-    "Nissan", "Omoda", "Ora", "Peugeot", "Porsche",
-    "RAM", "Renault", "Rolls-Royce", "Skoda",
-    "Soueast", "Ssangyong", "Subaru", "Suzuki",
-    "Tata", "Tesla", "Toyota", "Volkswagen",
-    "Volvo", "Yangwang",
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 Chrome/124 Safari/537.36"
+    )
+}
+
+CTA_WORDS = [
+    "explore more",
+    "learn more",
+    "discover more",
+    "discover",
+    "view details",
+    "view model",
+    "more details",
 ]
 
-
-# =========================================================
-# FILTERS
-# =========================================================
+SPEC_WORDS = [
+    "specification",
+    "specifications",
+    "technical specifications",
+    "technical specification",
+    "specs",
+]
 
 NOISE = {
-    "",
     "home",
-    "overview",
-    "learn more",
-    "read more",
-    "discover",
-    "discover more",
-    "explore",
-    "explore more",
-    "view more",
-    "view details",
-    "details",
-    "gallery",
-    "offers",
-    "services",
-    "owners",
-    "news",
-    "events",
-    "contact",
-    "contact us",
-    "connect",
-    "about",
-    "about us",
-    "shopping tools",
-    "request a quote",
-    "request a call",
-    "request a test drive",
-    "test drive",
-    "find a dealer",
-    "dealer",
-    "dealers",
-    "build",
-    "configure",
-    "configurator",
     "vehicles",
     "vehicle",
     "models",
-    "model",
-    "cars",
-    "car",
     "all models",
     "all vehicles",
-    "see all vehicles",
-    "see all models",
-    "brochure",
-    "download brochure",
-    "menu",
-    "search",
-    "privacy",
-    "terms",
-    "login",
-    "sign in",
-    "country",
-    "language",
-    "saudi arabia aljabr",
-    "saudi arabia",
-    "aljabr",
-}
-
-
-BAD_PHRASES = [
-    "vat included",
-    "request a quote",
-    "request a call",
-    "request a test drive",
+    "offers",
+    "owners",
+    "services",
     "shopping tools",
-    "customer service",
+    "about",
+    "contact",
     "find a dealer",
-    "accessories",
-    "warranty",
-    "cookie",
-    "privacy",
-    "terms",
-    "country",
-    "language",
-    "saudi arabia aljabr",
-]
-
-
-CTA_WORDS = [
+    "request a quote",
+    "test drive",
     "learn more",
-    "view details",
+    "explore more",
     "discover",
-    "explore",
-    "details",
-    "overview",
-    "read more",
-    "more",
-]
-
-
-# =========================================================
-# SPEC FIELDS
-# =========================================================
-
-SPEC_ALIASES = {
-
-    "Variant / Grade": [
-        "variant",
-        "grade",
-        "trim",
-        "version",
-    ],
-
-    "Body Type": [
-        "body type",
-        "body style",
-        "vehicle type",
-    ],
-
-    "Engine / Motor": [
-        "engine",
-        "engine type",
-        "motor",
-        "motor type",
-        "electric motor",
-    ],
-
-    "Displacement": [
-        "displacement",
-        "engine displacement",
-        "engine capacity",
-        "capacity",
-    ],
-
-    "Cylinders": [
-        "cylinders",
-        "cylinder count",
-        "number of cylinders",
-    ],
-
-    "Fuel / Powertrain": [
-        "fuel",
-        "fuel type",
-        "powertrain",
-        "propulsion",
-        "engine fuel",
-    ],
-
-    "Max Power": [
-        "maximum power",
-        "max power",
-        "power output",
-        "engine power",
-        "motor power",
-        "horsepower",
-    ],
-
-    "Max Torque": [
-        "maximum torque",
-        "max torque",
-        "torque output",
-        "engine torque",
-        "motor torque",
-    ],
-
-    "Transmission": [
-        "transmission",
-        "transmission type",
-        "gearbox",
-        "gear type",
-    ],
-
-    "Drivetrain": [
-        "drivetrain",
-        "drive type",
-        "drive system",
-        "driven wheels",
-        "wheel drive",
-    ],
-
-    "Battery Capacity": [
-        "battery capacity",
-        "battery pack capacity",
-        "battery pack",
-        "battery size",
-        "battery energy",
-        "usable battery",
-    ],
-
-    "Electric Range": [
-        "electric range",
-        "driving range",
-        "ev range",
-        "wltp range",
-        "nedc range",
-    ],
-
-    "AC Charging": [
-        "ac charging",
-        "ac charger",
-        "ac charge",
-    ],
-
-    "DC Charging": [
-        "dc charging",
-        "dc fast charging",
-        "fast charging",
-        "dc charger",
-    ],
-
-    "Charging Time": [
-        "charging time",
-        "charge time",
-    ],
-
-    "Fuel Economy": [
-        "fuel economy",
-        "fuel consumption",
-        "combined consumption",
-        "mileage",
-    ],
-
-    "Fuel Tank": [
-        "fuel tank",
-        "fuel tank capacity",
-        "tank capacity",
-    ],
-
-    "Seats": [
-        "seating capacity",
-        "seat capacity",
-        "number of seats",
-        "seats",
-        "passenger capacity",
-        "passengers",
-    ],
-
-    "Length": [
-        "overall length",
-        "length",
-    ],
-
-    "Width": [
-        "overall width",
-        "width",
-    ],
-
-    "Height": [
-        "overall height",
-        "height",
-    ],
-
-    "Wheelbase": [
-        "wheelbase",
-        "wheel base",
-    ],
-
-    "Ground Clearance": [
-        "ground clearance",
-    ],
-
-    "Cargo Capacity": [
-        "cargo capacity",
-        "cargo volume",
-        "luggage capacity",
-        "boot capacity",
-    ],
-
-    "Kerb Weight": [
-        "kerb weight",
-        "curb weight",
-        "vehicle weight",
-    ],
-
-    "Gross Weight": [
-        "gross vehicle weight",
-        "gross weight",
-        "gvw",
-        "gvwr",
-    ],
-
-    "Wheels / Tires": [
-        "wheel size",
-        "wheels",
-        "tire size",
-        "tyre size",
-        "tires",
-        "tyres",
-    ],
-
-    "Drive Modes": [
-        "drive modes",
-        "driving modes",
-        "terrain modes",
-    ],
-
-    "Acceleration": [
-        "acceleration",
-        "0-100",
-        "0–100",
-        "0 to 100",
-    ],
-
-    "Top Speed": [
-        "top speed",
-        "maximum speed",
-        "max speed",
-    ],
+    "discover more",
 }
 
 
 # =========================================================
-# BASIC FUNCTIONS
+# HELPERS
 # =========================================================
 
-def clean(value):
-
-    return re.sub(
-        r"\s+",
-        " ",
-        str(value or "")
-    ).strip(" \n\r\t:-|")
+def clean(x):
+    return re.sub(r"\s+", " ", str(x or "")).strip()
 
 
-def normalize_url(url):
-
+def normal_url(url):
     url = clean(url)
 
-    if url.startswith(
-        ("http://", "https://")
-    ):
-        return url
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
 
-    return "https://" + url
+    return url
 
 
-def same_domain(url1, url2):
+def same_site(a, b):
 
-    a = (
-        urlparse(url1)
-        .netloc
-        .lower()
-        .replace("www.", "")
+    aa = urlparse(a).netloc.lower().replace("www.", "")
+    bb = urlparse(b).netloc.lower().replace("www.", "")
+
+    return aa == bb
+
+
+def get_page(url):
+
+    response = requests.get(
+        url,
+        headers=HEADERS,
+        timeout=30,
+        allow_redirects=True,
     )
 
-    b = (
-        urlparse(url2)
-        .netloc
-        .lower()
-        .replace("www.", "")
+    response.raise_for_status()
+
+    return (
+        response.url,
+        BeautifulSoup(response.text, "html.parser")
     )
-
-    return a == b
-
-
-# =========================================================
-# CHROMIUM
-# =========================================================
-
-def find_chromium():
-
-    candidates = [
-        shutil.which("chromium"),
-        shutil.which("chromium-browser"),
-        shutil.which("google-chrome"),
-        shutil.which("google-chrome-stable"),
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "/usr/bin/google-chrome",
-    ]
-
-    for candidate in candidates:
-
-        if candidate:
-            return candidate
-
-    return None
-
-
-# =========================================================
-# RENDER WEBSITE
-# =========================================================
-
-def render_page(url, wait_ms=3500):
-
-    chromium_path = find_chromium()
-
-    with sync_playwright() as p:
-
-        options = {
-            "headless": True,
-            "args": [
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-            ],
-        }
-
-        if chromium_path:
-            options[
-                "executable_path"
-            ] = chromium_path
-
-        browser = (
-            p.chromium.launch(
-                **options
-            )
-        )
-
-        context = (
-            browser.new_context(
-                viewport={
-                    "width": 1440,
-                    "height": 1200,
-                },
-
-                user_agent=(
-                    "Mozilla/5.0 "
-                    "(Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 "
-                    "Chrome/124 Safari/537.36"
-                ),
-
-                locale="en-US",
-            )
-        )
-
-        page = (
-            context.new_page()
-        )
-
-        page.goto(
-            url,
-            wait_until="domcontentloaded",
-            timeout=60000,
-        )
-
-        try:
-
-            page.wait_for_load_state(
-                "networkidle",
-                timeout=15000
-            )
-
-        except Exception:
-
-            pass
-
-        page.wait_for_timeout(
-            wait_ms
-        )
-
-
-        # -----------------------------------------------
-        # COOKIE
-        # -----------------------------------------------
-
-        for label in [
-            "Accept",
-            "Accept All",
-            "Allow All",
-            "Agree",
-            "I Agree",
-        ]:
-
-            try:
-
-                button = (
-                    page.get_by_role(
-                        "button",
-                        name=re.compile(
-                            rf"^{re.escape(label)}$",
-                            re.I
-                        )
-                    )
-                )
-
-                if button.count() > 0:
-
-                    button.first.click(
-                        timeout=1000
-                    )
-
-                    page.wait_for_timeout(
-                        500
-                    )
-
-                    break
-
-            except Exception:
-
-                pass
-
-
-        # -----------------------------------------------
-        # Try opening vehicle/model menu
-        # -----------------------------------------------
-
-        for menu_name in [
-            "Vehicle",
-            "Vehicles",
-            "Models",
-            "Our Models",
-            "All Models",
-            "Cars",
-        ]:
-
-            try:
-
-                menu = (
-                    page.get_by_text(
-                        menu_name,
-                        exact=True
-                    )
-                )
-
-                if menu.count() > 0:
-
-                    menu.first.click(
-                        timeout=1500
-                    )
-
-                    page.wait_for_timeout(
-                        1200
-                    )
-
-                    break
-
-            except Exception:
-
-                pass
-
-
-        # -----------------------------------------------
-        # SCROLL
-        # -----------------------------------------------
-
-        try:
-
-            height = page.evaluate(
-                "document.body.scrollHeight"
-            )
-
-            for fraction in [
-                0.20,
-                0.40,
-                0.60,
-                0.80,
-                1.00,
-            ]:
-
-                page.evaluate(
-                    f"window.scrollTo(0, {int(height * fraction)})"
-                )
-
-                page.wait_for_timeout(
-                    600
-                )
-
-            page.evaluate(
-                "window.scrollTo(0, 0)"
-            )
-
-        except Exception:
-
-            pass
-
-
-        final_url = (
-            page.url
-        )
-
-        html = (
-            page.content()
-        )
-
-        visible_text = (
-            page.locator(
-                "body"
-            )
-            .inner_text(
-                timeout=10000
-            )
-        )
-
-
-        # -----------------------------------------------
-        # IMPORTANT V5:
-        # collect browser DOM elements with
-        # text + href + parent text
-        # -----------------------------------------------
-
-        elements = page.locator(
-            "a"
-        ).evaluate_all(
-            """
-            els => els.map(a => {
-
-                let parent = a.parentElement;
-
-                let levels = [];
-
-                for (let i = 0; i < 6 && parent; i++) {
-
-                    levels.push({
-                        tag: parent.tagName || '',
-                        cls: parent.className || '',
-                        text: (parent.innerText || '').trim()
-                    });
-
-                    parent = parent.parentElement;
-                }
-
-                return {
-
-                    text:
-                        (a.innerText || a.textContent || '').trim(),
-
-                    href:
-                        a.href || '',
-
-                    aria:
-                        a.getAttribute('aria-label') || '',
-
-                    title:
-                        a.getAttribute('title') || '',
-
-                    parents:
-                        levels
-                };
-            })
-            """
-        )
-
-        browser.close()
-
-
-    return {
-        "url": final_url,
-        "html": html,
-        "text": visible_text,
-        "elements": elements,
-    }
 
 
 # =========================================================
 # MAKE
 # =========================================================
 
-def infer_make(
-    soup,
-    url,
-    visible_text,
-    manual_make,
-):
+def detect_make(soup, url):
 
-    if clean(manual_make):
-
-        return clean(
-            manual_make
-        )
-
+    title = clean(
+        soup.title.get_text(" ", strip=True)
+        if soup.title
+        else ""
+    )
 
     host = (
         urlparse(url)
@@ -718,573 +129,298 @@ def infer_make(
         .replace("www.", "")
     )
 
+    known = [
+        "Kia",
+        "Toyota",
+        "Honda",
+        "Hyundai",
+        "Nissan",
+        "Ford",
+        "Chevrolet",
+        "BMW",
+        "Audi",
+        "Mercedes-Benz",
+        "Lexus",
+        "Mazda",
+        "Mitsubishi",
+        "Suzuki",
+        "Volkswagen",
+        "Volvo",
+        "Porsche",
+        "Jeep",
+        "GMC",
+        "Cadillac",
+        "Genesis",
+        "Geely",
+        "Chery",
+        "Changan",
+        "BYD",
+        "GAC",
+        "MG",
+        "JAC",
+        "Jetour",
+        "Jaecoo",
+        "Omoda",
+        "Haval",
+        "GWM",
+        "Hongqi",
+        "Exeed",
+        "Peugeot",
+        "Renault",
+    ]
 
-    compact_host = re.sub(
-        r"[^a-z0-9]",
-        "",
-        host
-    )
+    for brand in known:
 
-
-    # -----------------------------------------------
-    # DOMAIN FIRST
-    # -----------------------------------------------
-
-    for brand in sorted(
-        BRANDS,
-        key=len,
-        reverse=True
-    ):
-
-        compact_brand = re.sub(
+        key = re.sub(
             r"[^a-z0-9]",
             "",
             brand.lower()
         )
 
-        if compact_brand in compact_host:
+        domain = re.sub(
+            r"[^a-z0-9]",
+            "",
+            host
+        )
 
+        if key in domain:
             return brand
 
-
-    # -----------------------------------------------
-    # TITLE
-    # -----------------------------------------------
-
-    title = clean(
-        soup.title.get_text(
-            " ",
-            strip=True
-        )
-        if soup.title
-        else ""
-    )
-
-
-    for brand in sorted(
-        BRANDS,
-        key=len,
-        reverse=True
-    ):
-
-        pattern = (
-            r"(?<![A-Za-z0-9])"
-            + re.escape(brand)
-            + r"(?![A-Za-z0-9])"
-        )
+    for brand in known:
 
         if re.search(
-            pattern,
+            r"\b" + re.escape(brand) + r"\b",
             title,
             re.I
         ):
-
             return brand
 
-
-    # -----------------------------------------------
-    # PAGE START
-    # -----------------------------------------------
-
-    page_start = (
-        clean(
-            visible_text
-        )[:2000]
-    )
-
-
-    for brand in sorted(
-        BRANDS,
-        key=len,
-        reverse=True
-    ):
-
-        pattern = (
-            r"(?<![A-Za-z0-9])"
-            + re.escape(brand)
-            + r"(?![A-Za-z0-9])"
-        )
-
-        if re.search(
-            pattern,
-            page_start,
-            re.I
-        ):
-
-            return brand
-
-
-    return (
-        host
-        .split(".")[0]
-        .replace("-", " ")
-        .title()
-    )
+    return host.split(".")[0].title()
 
 
 # =========================================================
-# MODEL NAME
+# MODEL NAME FROM TEXT
 # =========================================================
 
-def clean_model_name(
-    name,
-    make
-):
+def model_name_from_text(text, make):
 
-    name = clean(name)
+    text = clean(text)
 
-
-    # Remove line after From SAR etc.
-    name = re.sub(
-        r"\bfrom\s+(?:sar|aed|qar|usd).*$",
-        "",
-        name,
-        flags=re.I
-    )
-
-
-    # Remove CTA
-    for cta in CTA_WORDS:
-
-        name = re.sub(
-            re.escape(cta),
-            "",
-            name,
-            flags=re.I
-        )
-
-
-    # Remove The
-    name = re.sub(
+    text = re.sub(
         r"^the\s+",
         "",
-        name,
+        text,
         flags=re.I
     )
 
-
-    # Remove Make prefix
-    name = re.sub(
-        r"^"
-        + re.escape(make)
-        + r"\s+",
+    text = re.sub(
+        r"^" + re.escape(make) + r"\s+",
         "",
-        name,
+        text,
         flags=re.I
     )
 
+    text = re.split(
+        r"\bfrom\s+(?:sar|qar|aed|usd)\b",
+        text,
+        flags=re.I
+    )[0]
 
-    return clean(
-        name
-    )
+    return clean(text)
 
 
-def plausible_model(
-    name,
-    make
-):
+def valid_model(name, make):
 
-    name = (
-        clean_model_name(
-            name,
-            make
-        )
-    )
+    name = clean(name)
 
     if not name:
         return False
 
-    lower = (
-        name.lower()
-    )
-
-    if lower in NOISE:
+    if name.lower() in NOISE:
         return False
 
-    if len(name) < 2:
+    if name.lower() == make.lower():
         return False
 
-    if len(name) > 40:
+    if len(name) < 2 or len(name) > 45:
         return False
 
-    if re.fullmatch(
-        r"[\d\s.,]+",
-        name
-    ):
-        return False
-
-    if any(
-        phrase in lower
-        for phrase in BAD_PHRASES
-    ):
+    if re.fullmatch(r"[\d\s.,]+", name):
         return False
 
     return True
 
 
 # =========================================================
-# EXTRACT MODEL NAME FROM CARD TEXT
+# FIND MODELS
 # =========================================================
 
-def model_from_card_text(
-    text,
-    make
-):
-
-    text = clean(text)
-
-    if not text:
-        return ""
-
-
-    # Split card into lines
-    raw_lines = re.split(
-        r"[\n\r]+",
-        str(text)
-    )
-
-
-    lines = []
-
-    for line in raw_lines:
-
-        line = clean(line)
-
-        if not line:
-            continue
-
-        lower = (
-            line.lower()
-        )
-
-        if lower in NOISE:
-            continue
-
-        if lower.startswith(
-            "from "
-        ):
-            continue
-
-        if "vat included" in lower:
-            continue
-
-        if lower in [
-            "ice",
-            "hev",
-            "phev",
-            "bev",
-            "ev",
-            "hybrid",
-            "electric",
-            "diesel",
-            "gasoline",
-            "petrol",
-        ]:
-            continue
-
-        if plausible_model(
-            line,
-            make
-        ):
-
-            lines.append(
-                clean_model_name(
-                    line,
-                    make
-                )
-            )
-
-
-    if not lines:
-        return ""
-
-
-    # First sensible short line
-    return lines[0]
-
-
-# =========================================================
-# FIND MODEL CARDS
-# =========================================================
-
-def discover_models(
-    rendered,
-    make
-):
-
-    base_url = (
-        rendered["url"]
-    )
-
-    elements = (
-        rendered["elements"]
-    )
+def find_models(soup, base_url, make):
 
     rows = []
 
-
-    # =====================================================
+    # -----------------------------------------------------
     # METHOD 1
-    # CTA link → walk UP parents → find model card
-    #
-    # This is the main V5 fix.
-    # =====================================================
+    # Heading → nearby Explore/Learn More
+    # -----------------------------------------------------
 
-    for element in elements:
+    for heading in soup.find_all(
+        ["h1", "h2", "h3", "h4", "h5", "h6"]
+    ):
 
-        link_text = clean(
-            element.get(
-                "text",
-                ""
-            )
+        heading_text = clean(
+            heading.get_text(" ", strip=True)
         )
 
-        href = clean(
-            element.get(
-                "href",
-                ""
-            )
-        )
-
-        if not href:
+        if not heading_text:
             continue
 
-
-        lower_link = (
-            link_text.lower()
+        model = model_name_from_text(
+            heading_text,
+            make
         )
 
-
-        is_cta = (
-            lower_link
-            in CTA_WORDS
-        )
-
-
-        if not is_cta:
+        if not valid_model(model, make):
             continue
 
+        container = heading
 
-        if not same_domain(
-            base_url,
-            href
-        ):
-            continue
+        found_url = ""
 
+        # climb up only a few levels
+        for _ in range(5):
 
-        parents = (
-            element.get(
-                "parents",
-                []
-            )
-        )
-
-
-        candidate = ""
-
-
-        # Walk from nearest parent outward
-        for parent in parents:
-
-            parent_text = clean(
-                parent.get(
-                    "text",
-                    ""
-                )
-            )
-
-            if not parent_text:
-                continue
-
-            # Avoid giant containers
-            if len(parent_text) > 600:
-                continue
-
-
-            possible = (
-                model_from_card_text(
-                    parent_text,
-                    make
-                )
-            )
-
-
-            if plausible_model(
-                possible,
-                make
-            ):
-
-                candidate = (
-                    possible
-                )
-
+            if not container:
                 break
 
-
-        if candidate:
-
-            rows.append(
-                {
-                    "Make":
-                    make,
-
-                    "Model":
-                    candidate,
-
-                    "Model URL":
-                    href,
-
-                    "Detected From":
-                    "Model Card + CTA",
-                }
+            links = container.find_all(
+                "a",
+                href=True
             )
 
+            for a in links:
 
-    # =====================================================
+                label = clean(
+                    a.get_text(" ", strip=True)
+                ).lower()
+
+                if any(
+                    word in label
+                    for word in CTA_WORDS
+                ):
+
+                    candidate_url = urljoin(
+                        base_url,
+                        a.get("href")
+                    )
+
+                    if same_site(
+                        base_url,
+                        candidate_url
+                    ):
+                        found_url = candidate_url
+                        break
+
+            if found_url:
+                break
+
+            container = container.parent
+
+        if found_url:
+
+            rows.append({
+                "Make": make,
+                "Model": model,
+                "Model URL": found_url,
+                "Detected From": "Heading + CTA",
+            })
+
+    # -----------------------------------------------------
     # METHOD 2
-    # Model-looking URLs
-    # =====================================================
+    # Links that look like model pages
+    # -----------------------------------------------------
 
-    for element in elements:
+    for a in soup.find_all("a", href=True):
 
-        href = clean(
-            element.get(
-                "href",
-                ""
-            )
-        )
-
-        text = clean(
-            element.get(
-                "text",
-                ""
-            )
-        )
-
-
-        if not href:
-            continue
-
-
-        if not same_domain(
+        href = urljoin(
             base_url,
-            href
-        ):
-            continue
-
-
-        path = (
-            urlparse(href)
-            .path
-            .lower()
+            a["href"]
         )
 
+        if not same_site(base_url, href):
+            continue
 
-        model_route = any(
-            route in path
-            for route in [
-                "/vehicles/",
-                "/vehicle/",
+        path = urlparse(href).path.lower()
+
+        looks_like_vehicle = any(
+            x in path
+            for x in [
+                "/showroom/",
                 "/models/",
                 "/model/",
+                "/vehicles/",
+                "/vehicle/",
                 "/cars/",
-                "/car/",
             ]
         )
 
-
-        if not model_route:
+        if not looks_like_vehicle:
             continue
 
-
-        candidate = (
-            clean_model_name(
-                text,
-                make
-            )
+        text = clean(
+            a.get_text(" ", strip=True)
         )
 
-
-        if not plausible_model(
-            candidate,
+        model = model_name_from_text(
+            text,
             make
-        ):
+        )
 
-            # URL fallback
+        if not valid_model(model, make):
+
             parts = [
-                p
-                for p
-                in urlparse(
-                    href
-                ).path
-                .strip("/")
-                .split("/")
+                p for p in
+                urlparse(href).path.split("/")
                 if p
             ]
 
-
             if parts:
 
-                candidate = (
-                    unquote(
-                        parts[-1]
-                    )
-                    .replace(
-                        "-",
-                        " "
-                    )
-                    .replace(
-                        "_",
-                        " "
-                    )
-                )
-
-                candidate = clean(
-                    candidate
-                )
-
-                candidate = " ".join(
-                    word.upper()
-                    if (
-                        re.search(
-                            r"\d",
-                            word
-                        )
-                        or
-                        len(word) <= 3
-                    )
-                    else
-                    word.title()
-                    for word
-                    in candidate.split()
-                )
-
-
-        if plausible_model(
-            candidate,
-            make
-        ):
-
-            rows.append(
-                {
-                    "Make":
-                    make,
-
-                    "Model":
-                    candidate,
-
-                    "Model URL":
-                    href,
-
-                    "Detected From":
-                    "Model URL",
+                ignore = {
+                    "showroom",
+                    "models",
+                    "model",
+                    "vehicles",
+                    "vehicle",
+                    "cars",
+                    "gallery.html",
+                    "overview.html",
+                    "specification.html",
+                    "specifications.html",
                 }
-            )
 
+                usable = [
+                    p for p in parts
+                    if p.lower() not in ignore
+                ]
 
-    # =====================================================
-    # CLEAN
-    # =====================================================
+                if usable:
+
+                    model = (
+                        usable[-1]
+                        .replace("-", " ")
+                        .replace("_", " ")
+                        .upper()
+                    )
+
+        if valid_model(model, make):
+
+            rows.append({
+                "Make": make,
+                "Model": model,
+                "Model URL": href,
+                "Detected From": "Vehicle URL",
+            })
 
     if not rows:
 
@@ -1293,187 +429,134 @@ def discover_models(
                 "Make",
                 "Model",
                 "Model URL",
-                "Detected From",
+                "Detected From"
             ]
         )
 
+    df = pd.DataFrame(rows)
 
-    df = pd.DataFrame(
-        rows
-    )
-
-
-    df["Model"] = (
-        df["Model"]
-        .map(
-            lambda x:
-            clean_model_name(
-                x,
-                make
-            )
-        )
-    )
-
-
+    # Remove obvious CTA names accidentally detected
     df = df[
-        df[
-            "Model"
-        ].map(
-            lambda x:
-            plausible_model(
-                x,
-                make
-            )
-        )
+        ~df["Model"]
+        .str.lower()
+        .isin(NOISE)
     ]
 
-
-    # Remove homepage pretending to be model page
-    home_path = (
-        urlparse(
-            base_url
-        ).path.rstrip("/")
-    )
-
-
-    def real_model_url(url):
-
-        path = (
-            urlparse(
-                url
-            ).path.rstrip("/")
-        )
-
-        if (
-            url == base_url
-            or
-            path == home_path
-        ):
-            return False
-
-        return True
-
-
-    df["Has Model URL"] = (
+    # Prefer shortest useful URL per model
+    df["URL Length"] = (
         df["Model URL"]
-        .map(
-            real_model_url
-        )
+        .str.len()
     )
 
-
-    # Prefer records that have actual model URL
     df = (
         df.sort_values(
-            [
-                "Model",
-                "Has Model URL",
-            ],
-            ascending=[
-                True,
-                False,
-            ]
+            ["Model", "URL Length"]
         )
         .drop_duplicates(
-            subset=[
-                "Make",
-                "Model",
-            ],
+            ["Make", "Model"],
             keep="first"
         )
-        .reset_index(
-            drop=True
+        .drop(
+            columns=["URL Length"]
         )
+        .reset_index(drop=True)
     )
-
 
     return df
 
 
 # =========================================================
-# SPEC FIELD MATCHING
+# FIND SPECIFICATION PAGE
 # =========================================================
 
-def canonical_field(
-    label
-):
+def find_spec_page(model_url):
 
-    label = (
-        clean(label)
-        .lower()
-    )
+    try:
 
-
-    for (
-        field,
-        aliases
-    ) in SPEC_ALIASES.items():
-
-        for alias in aliases:
-
-            if (
-                label == alias
-                or
-                alias in label
-            ):
-
-                return field
-
-
-    return None
-
-
-# =========================================================
-# STRUCTURED SPEC PAIRS
-# =========================================================
-
-def add_pair(
-    pairs,
-    label,
-    value
-):
-
-    label = clean(
-        label
-    )
-
-    value = clean(
-        value
-    )
-
-
-    if not label:
-        return
-
-    if not value:
-        return
-
-    if len(label) > 100:
-        return
-
-    if len(value) > 400:
-        return
-
-
-    pairs.append(
-        (
-            label,
-            value
+        final_url, soup = get_page(
+            model_url
         )
+
+    except Exception:
+
+        return model_url
+
+    for a in soup.find_all(
+        "a",
+        href=True
+    ):
+
+        label = clean(
+            a.get_text(" ", strip=True)
+        ).lower()
+
+        href_text = (
+            a["href"].lower()
+        )
+
+        if (
+            any(x in label for x in SPEC_WORDS)
+            or
+            "specification" in href_text
+            or
+            "/spec" in href_text
+        ):
+
+            return urljoin(
+                final_url,
+                a["href"]
+            )
+
+    # Kia-style fallback
+    if "gallery.html" in final_url:
+
+        return final_url.replace(
+            "gallery.html",
+            "specification.html"
+        )
+
+    if "overview.html" in final_url:
+
+        return final_url.replace(
+            "overview.html",
+            "specification.html"
+        )
+
+    return final_url
+
+
+# =========================================================
+# EXTRACT FLEXIBLE SPECS
+# =========================================================
+
+def extract_specs(model_url, make, model):
+
+    spec_url = find_spec_page(
+        model_url
     )
 
+    try:
 
-def extract_pairs(
-    soup
-):
+        final_url, soup = get_page(
+            spec_url
+        )
+
+    except Exception as e:
+
+        return [{
+            "Make": make,
+            "Model": model,
+            "Source URL": spec_url,
+            "Error": str(e)
+        }]
 
     pairs = []
 
-
+    # -----------------------------------------------------
     # TABLE
-    for tr in soup.find_all(
-        "tr"
-    ):
+    # -----------------------------------------------------
+
+    for tr in soup.find_all("tr"):
 
         cells = [
             clean(
@@ -1482,1021 +565,411 @@ def extract_pairs(
                     strip=True
                 )
             )
-            for x
-            in tr.find_all(
-                [
-                    "th",
-                    "td",
-                ]
+            for x in tr.find_all(
+                ["th", "td"]
             )
         ]
-
 
         if len(cells) >= 2:
 
-            add_pair(
-                pairs,
-                cells[0],
-                " | ".join(
-                    cells[1:]
+            pairs.append(
+                (
+                    cells[0],
+                    " | ".join(cells[1:])
                 )
             )
 
+    # -----------------------------------------------------
+    # DT / DD
+    # -----------------------------------------------------
 
-    # DT DD
-    for dt in soup.find_all(
-        "dt"
-    ):
+    for dt in soup.find_all("dt"):
 
-        dd = (
-            dt.find_next_sibling(
-                "dd"
-            )
-        )
-
+        dd = dt.find_next_sibling("dd")
 
         if dd:
 
-            add_pair(
-                pairs,
-                dt.get_text(
-                    " ",
-                    strip=True
-                ),
-                dd.get_text(
-                    " ",
-                    strip=True
+            pairs.append(
+                (
+                    clean(
+                        dt.get_text(
+                            " ",
+                            strip=True
+                        )
+                    ),
+                    clean(
+                        dd.get_text(
+                            " ",
+                            strip=True
+                        )
+                    )
                 )
             )
 
+    # -----------------------------------------------------
+    # HTML blocks
+    # -----------------------------------------------------
 
-    # Label : Value
-    for element in soup.find_all(
-        [
-            "li",
-            "p",
-            "div",
-        ]
+    for tag in soup.find_all(
+        ["li", "p", "div"]
     ):
 
-        text = clean(
-            element.get_text(
-                " ",
-                strip=True
-            )
+        children = tag.find_all(
+            recursive=False
         )
-
-
-        if (
-            4
-            <= len(text)
-            <= 250
-        ):
-
-            match = re.match(
-                r"^([^:]{2,80})"
-                r"\s*:\s*"
-                r"(.{1,160})$",
-                text
-            )
-
-
-            if match:
-
-                add_pair(
-                    pairs,
-                    match.group(1),
-                    match.group(2)
-                )
-
-
-    # TWO CHILDREN
-    for element in soup.find_all(
-        [
-            "div",
-            "li",
-        ]
-    ):
-
-        children = (
-            element.find_all(
-                recursive=False
-            )
-        )
-
 
         if len(children) == 2:
 
             label = clean(
-                children[0]
-                .get_text(
+                children[0].get_text(
                     " ",
                     strip=True
                 )
             )
 
             value = clean(
-                children[1]
-                .get_text(
+                children[1].get_text(
                     " ",
                     strip=True
                 )
             )
 
-
             if (
-                len(label) <= 80
-                and
-                len(value) <= 300
+                label
+                and value
+                and len(label) <= 80
+                and len(value) <= 250
+                and label != value
             ):
 
-                add_pair(
-                    pairs,
-                    label,
-                    value
+                pairs.append(
+                    (label, value)
                 )
 
+    # -----------------------------------------------------
+    # COLLECT ALL FIELDS
+    # -----------------------------------------------------
 
-    return pairs
+    result = {
+        "Make": make,
+        "Model": model,
+        "Source URL": final_url,
+    }
 
+    used = set()
 
-# =========================================================
-# FALLBACK SPEC PATTERNS
-# =========================================================
+    for label, value in pairs:
 
-FALLBACKS = {
+        label = clean(label)
+        value = clean(value)
 
-    "Displacement": [
+        if not label or not value:
+            continue
 
-        r"(?i)\b([0-9,]+\s*cc)\b",
+        if label.lower() in NOISE:
+            continue
 
-        r"(?i)\b([0-9.]+\s*(?:l|liter|litre))\s+engine\b",
+        key = label
 
-    ],
+        # prevent duplicate Excel column names
+        if key in used:
 
-    "Max Power": [
-
-        (
-            r"(?i)"
-            r"(?:maximum|max\.?)?\s*"
-            r"(?:power|output|horsepower)"
-            r"\s*[:\-]?\s*"
-            r"([0-9.,]+\s*(?:hp|bhp|ps|kw))"
-        ),
-
-    ],
-
-    "Max Torque": [
-
-        (
-            r"(?i)"
-            r"(?:maximum|max\.?)?\s*"
-            r"torque"
-            r"\s*[:\-]?\s*"
-            r"([0-9.,]+\s*(?:nm|n\.m))"
-        ),
-
-    ],
-
-    "Drivetrain": [
-
-        r"(?i)\b(FWD|RWD|AWD|4WD|4X4|2WD)\b",
-
-    ],
-
-    "Battery Capacity": [
-
-        (
-            r"(?i)"
-            r"(?:battery(?:\s+capacity|\s+pack|\s+size)?)"
-            r"\s*[:\-]?\s*"
-            r"([0-9.,]+\s*kwh)"
-        ),
-
-    ],
-
-    "Electric Range": [
-
-        (
-            r"(?i)"
-            r"(?:electric|ev|driving|wltp|nedc)?"
-            r"\s*range"
-            r"\s*[:\-]?\s*"
-            r"([0-9.,]+\s*km)"
-        ),
-
-    ],
-
-    "Fuel Economy": [
-
-        r"(?i)\b([0-9.,]+\s*km\s*/\s*l)\b",
-
-        r"(?i)\b([0-9.,]+\s*l\s*/\s*100\s*km)\b",
-
-    ],
-
-    "Top Speed": [
-
-        (
-            r"(?i)"
-            r"(?:top|max(?:imum)?\s+speed)"
-            r"\s*[:\-]?\s*"
-            r"([0-9.,]+\s*km/?h)"
-        ),
-
-    ],
-}
-
-
-# =========================================================
-# INSPECT MODEL
-# =========================================================
-
-def inspect_model(
-    model_url,
-    make,
-    model,
-):
-
-    try:
-
-        rendered = (
-            render_page(
-                model_url,
-                wait_ms=3000
-            )
-        )
-
-
-        soup = (
-            BeautifulSoup(
-                rendered["html"],
-                "html.parser"
-            )
-        )
-
-
-        result = {
-
-            "Make":
-            make,
-
-            "Model":
-            model,
-
-            "Source URL":
-            rendered["url"],
-        }
-
-
-        raw = []
-
-
-        # -----------------------------------------------
-        # STRUCTURED SPECS
-        # -----------------------------------------------
-
-        for (
-            label,
-            value
-        ) in extract_pairs(
-            soup
-        ):
-
-            field = (
-                canonical_field(
-                    label
-                )
-            )
-
-
-            if field:
-
-                if not result.get(
-                    field
-                ):
-
-                    result[
-                        field
-                    ] = value
-
-
-                raw.append(
-                    f"{label}: {value}"
-                )
-
-
-        # -----------------------------------------------
-        # VISIBLE TEXT
-        # -----------------------------------------------
-
-        text = clean(
-            rendered[
-                "text"
-            ]
-        )
-
-
-        # -----------------------------------------------
-        # FALLBACK
-        # -----------------------------------------------
-
-        for (
-            field,
-            patterns
-        ) in FALLBACKS.items():
-
-            if result.get(
-                field
-            ):
+            if result.get(key) == value:
                 continue
 
+            number = 2
 
-            for pattern in patterns:
+            while f"{key} ({number})" in used:
+                number += 1
 
-                match = re.search(
-                    pattern,
-                    text
+            key = f"{key} ({number})"
+
+        result[key] = value
+        used.add(key)
+
+    # -----------------------------------------------------
+    # TEXT FALLBACKS
+    # -----------------------------------------------------
+
+    page_text = clean(
+        soup.get_text(" ", strip=True)
+    )
+
+    patterns = {
+        "Displacement": [
+            r"\b([0-9,]+\s*cc)\b",
+            r"\b([0-9.]+\s*[Ll])\s+engine\b",
+        ],
+
+        "Max Power": [
+            r"(?i)(?:power|horsepower)[^0-9]{0,20}([0-9.]+\s*(?:hp|ps|kw|bhp))"
+        ],
+
+        "Max Torque": [
+            r"(?i)torque[^0-9]{0,20}([0-9.]+\s*(?:nm|n\.m))"
+        ],
+
+        "Battery Capacity": [
+            r"(?i)battery[^0-9]{0,30}([0-9.]+\s*kwh)"
+        ],
+
+        "Electric Range": [
+            r"(?i)(?:range)[^0-9]{0,20}([0-9.]+\s*km)"
+        ],
+
+        "Wheelbase": [
+            r"(?i)wheelbase[^0-9]{0,20}([0-9,.]+\s*mm)"
+        ],
+
+        "Top Speed": [
+            r"(?i)(?:top|max(?:imum)?)\s+speed[^0-9]{0,20}([0-9.]+\s*km/?h)"
+        ],
+    }
+
+    for field, regexes in patterns.items():
+
+        if field in result:
+            continue
+
+        for pattern in regexes:
+
+            m = re.search(
+                pattern,
+                page_text
+            )
+
+            if m:
+
+                result[field] = clean(
+                    m.group(1)
                 )
 
+                break
 
-                if match:
-
-                    result[
-                        field
-                    ] = clean(
-                        match.group(1)
-                    )
-
-                    break
-
-
-        # -----------------------------------------------
-        # TRANSMISSION
-        # -----------------------------------------------
-
-        if not result.get(
-            "Transmission"
-        ):
-
-            patterns = [
-
-                r"(?i)\b([0-9]+[- ]speed automatic)\b",
-
-                r"(?i)\b([0-9]+[- ]speed manual)\b",
-
-                r"(?i)\b([0-9]+[- ]speed DCT)\b",
-
-                r"(?i)\b(CVT)\b",
-
-                r"(?i)\b(e-CVT)\b",
-
-                r"(?i)\b(DCT)\b",
-
-                r"(?i)\b(automatic transmission)\b",
-
-                r"(?i)\b(manual transmission)\b",
-            ]
-
-
-            for pattern in patterns:
-
-                match = re.search(
-                    pattern,
-                    text
-                )
-
-
-                if match:
-
-                    result[
-                        "Transmission"
-                    ] = clean(
-                        match.group(1)
-                    )
-
-                    break
-
-
-        # -----------------------------------------------
-        # POWERTRAIN
-        # -----------------------------------------------
-
-        if not result.get(
-            "Fuel / Powertrain"
-        ):
-
-            options = [
-
-                "Plug-in Hybrid",
-                "PHEV",
-                "Hybrid",
-                "HEV",
-                "Battery Electric",
-                "BEV",
-                "Electric",
-                "Diesel",
-                "Gasoline",
-                "Petrol",
-
-            ]
-
-
-            found = []
-
-
-            for option in options:
-
-                if re.search(
-                    r"\b"
-                    + re.escape(
-                        option
-                    )
-                    + r"\b",
-                    text,
-                    re.I
-                ):
-
-                    found.append(
-                        option
-                    )
-
-
-            if found:
-
-                result[
-                    "Fuel / Powertrain"
-                ] = ", ".join(
-                    dict.fromkeys(
-                        found
-                    )
-                )
-
-
-        result[
-            "Raw Matched Specs"
-        ] = " ; ".join(
-            raw[:120]
-        )
-
-
-        return result
-
-
-    except Exception as error:
-
-        return {
-
-            "Make":
-            make,
-
-            "Model":
-            model,
-
-            "Source URL":
-            model_url,
-
-            "Error":
-            str(error),
-        }
+    return [result]
 
 
 # =========================================================
 # EXCEL
 # =========================================================
 
-def create_excel(
-    models_df,
-    specs_df,
-    source_url
-):
+def make_excel(models, specs):
 
-    output = (
-        io.BytesIO()
-    )
-
+    output = io.BytesIO()
 
     with pd.ExcelWriter(
         output,
         engine="openpyxl"
     ) as writer:
 
-
-        models_df.to_excel(
+        models.to_excel(
             writer,
             index=False,
             sheet_name="Models"
         )
 
+        if not specs.empty:
 
-        if (
-            specs_df is not None
-            and
-            not specs_df.empty
-        ):
-
-            specs_df.to_excel(
+            specs.to_excel(
                 writer,
                 index=False,
                 sheet_name="Specs"
             )
 
-
-        pd.DataFrame(
-            [
-                {
-                    "Source URL":
-                    source_url,
-
-                    "Method":
-                    (
-                        "Browser-rendered model card "
-                        "and specification extraction."
-                    ),
-
-                    "Rule":
-                    (
-                        "Only fields detected on "
-                        "the source are displayed. "
-                        "Missing values remain blank."
-                    ),
-                }
-            ]
-        ).to_excel(
-            writer,
-            index=False,
-            sheet_name="Methodology"
-        )
-
-
-    return (
-        output.getvalue()
-    )
+    return output.getvalue()
 
 
 # =========================================================
-# SIDEBAR
-# =========================================================
-
-manual_make = (
-    st.sidebar.text_input(
-        "Make (optional)",
-        placeholder=(
-            "Auto-detect if blank"
-        )
-    )
-)
-
-
-max_pages = (
-    st.sidebar.slider(
-        "Max model pages for spec scan",
-        min_value=1,
-        max_value=50,
-        value=10,
-    )
-)
-
-
-# =========================================================
-# URL
+# UI
 # =========================================================
 
 url = st.text_input(
     "Website URL",
-    placeholder=(
-        "https://www.kia.com/sa/en/main.html"
-    )
+    placeholder="https://www.kia.com/sa/en/main.html"
 )
 
-
-# =========================================================
-# CHECK
-# =========================================================
-
 if st.button(
-    "🌐 Open website & find models",
+    "🔎 Research Website",
     type="primary",
-    use_container_width=True,
+    use_container_width=True
 ):
 
     if not clean(url):
 
-        st.error(
-            "Enter a website URL."
+        st.warning(
+            "ใส่ URL ก่อน"
         )
 
         st.stop()
 
-
     try:
 
         with st.spinner(
-            "Opening website, loading JavaScript and reading model cards..."
+            "กำลังอ่านเว็บไซต์..."
         ):
 
-            rendered = (
-                render_page(
-                    normalize_url(
-                        url
-                    )
-                )
+            final_url, soup = get_page(
+                normal_url(url)
             )
 
-
-            soup = (
-                BeautifulSoup(
-                    rendered[
-                        "html"
-                    ],
-                    "html.parser"
-                )
+            make = detect_make(
+                soup,
+                final_url
             )
 
-
-            make = (
-                infer_make(
-                    soup,
-                    rendered[
-                        "url"
-                    ],
-                    rendered[
-                        "text"
-                    ],
-                    manual_make,
-                )
+            models = find_models(
+                soup,
+                final_url,
+                make
             )
 
+            st.session_state["make"] = make
+            st.session_state["models"] = models
+            st.session_state["specs"] = pd.DataFrame()
 
-            models_df = (
-                discover_models(
-                    rendered,
-                    make
-                )
-            )
+    except Exception as e:
 
-
-            st.session_state[
-                "models"
-            ] = models_df
-
-
-            st.session_state[
-                "make"
-            ] = make
-
-
-            st.session_state[
-                "source"
-            ] = rendered[
-                "url"
-            ]
-
-
-            st.session_state[
-                "specdf"
-            ] = pd.DataFrame()
-
-
-            st.session_state[
-                "text_length"
-            ] = len(
-                rendered[
-                    "text"
-                ]
-            )
-
-
-    except Exception as error:
-
-        st.error(
-            "Browser error"
-        )
-
-        st.code(
-            str(error)
-        )
+        st.error(str(e))
 
 
 # =========================================================
-# MODEL RESULTS
+# SHOW MODELS
 # =========================================================
 
 if "models" in st.session_state:
 
-    models_df = (
-        st.session_state[
-            "models"
-        ]
-    )
+    models = st.session_state["models"]
 
-
-    c1, c2, c3 = (
-        st.columns(3)
-    )
-
+    c1, c2 = st.columns(2)
 
     c1.metric(
         "Make",
-        st.session_state.get(
-            "make",
-            "-"
-        )
+        st.session_state["make"]
     )
-
 
     c2.metric(
         "Models found",
-        len(
-            models_df
-        )
+        len(models)
     )
-
-
-    if not models_df.empty:
-
-        valid_urls = int(
-            models_df[
-                "Has Model URL"
-            ].sum()
-        )
-
-    else:
-
-        valid_urls = 0
-
-
-    c3.metric(
-        "Models with URL",
-        valid_urls
-    )
-
 
     st.subheader(
-        "1. Models found"
+        "Models"
     )
 
-
-    if models_df.empty:
+    if models.empty:
 
         st.warning(
-            "No reliable model cards found."
+            "ยังไม่พบ Model จากเว็บไซต์นี้"
         )
-
 
     else:
 
-        editable = (
-            models_df.assign(
-                Inspect=False
-            )
+        choose = models.copy()
+
+        choose.insert(
+            0,
+            "Research Specs",
+            False
         )
 
-
-        edited = (
-            st.data_editor(
-                editable,
-                hide_index=True,
-                use_container_width=True,
-
-                column_config={
-
-                    "Inspect":
-                    st.column_config.CheckboxColumn(
-                        "Inspect specs"
-                    ),
-
-                    "Has Model URL":
-                    st.column_config.CheckboxColumn(
-                        "Valid URL"
-                    ),
-                },
-
-                disabled=[
-                    "Make",
-                    "Model",
-                    "Model URL",
-                    "Detected From",
-                    "Has Model URL",
-                ],
-            )
+        edited = st.data_editor(
+            choose,
+            hide_index=True,
+            use_container_width=True,
+            disabled=[
+                "Make",
+                "Model",
+                "Model URL",
+                "Detected From"
+            ]
         )
-
-
-        # =================================================
-        # INSPECT
-        # =================================================
 
         if st.button(
-            "⚙️ Inspect selected models",
-            use_container_width=True,
+            "⚙️ Get Specs",
+            use_container_width=True
         ):
 
-            selected = (
-                edited[
-                    (
-                        edited[
-                            "Inspect"
-                        ] == True
-                    )
-                    &
-                    (
-                        edited[
-                            "Has Model URL"
-                        ] == True
-                    )
-                ]
-                .head(
-                    max_pages
-                )
-            )
-
+            selected = edited[
+                edited["Research Specs"] == True
+            ]
 
             if selected.empty:
 
                 st.warning(
-                    "Select at least one model "
-                    "that has a valid Model URL."
+                    "ติ๊กรุ่นที่ต้องการก่อน"
                 )
-
 
             else:
 
-                results = []
+                all_specs = []
 
-                progress = (
-                    st.progress(0)
-                )
+                progress = st.progress(0)
 
-                status = (
-                    st.empty()
-                )
-
-                total = (
-                    len(selected)
-                )
-
-
-                for (
-                    number,
-                    (_, row)
-                ) in enumerate(
+                for i, (_, row) in enumerate(
                     selected.iterrows(),
                     start=1
                 ):
 
-                    status.write(
-                        f"Reading "
-                        f"{row['Make']} "
-                        f"{row['Model']} "
-                        f"({number}/{total})..."
-                    )
+                    with st.spinner(
+                        f"กำลังอ่าน {row['Make']} {row['Model']}..."
+                    ):
 
-
-                    result = (
-                        inspect_model(
-                            row[
-                                "Model URL"
-                            ],
-                            row[
-                                "Make"
-                            ],
-                            row[
-                                "Model"
-                            ],
+                        all_specs.extend(
+                            extract_specs(
+                                row["Model URL"],
+                                row["Make"],
+                                row["Model"]
+                            )
                         )
-                    )
-
-
-                    results.append(
-                        result
-                    )
-
 
                     progress.progress(
-                        number
-                        / total
+                        i / len(selected)
                     )
 
-
-                status.write(
-                    "Finished."
-                )
-
-
-                st.session_state[
-                    "specdf"
-                ] = (
+                st.session_state["specs"] = (
                     pd.DataFrame(
-                        results
+                        all_specs
                     )
                 )
 
 
-    # =====================================================
-    # SPECS
-    # =====================================================
+# =========================================================
+# SHOW SPECS
+# =========================================================
 
-    specs_df = (
-        st.session_state.get(
-            "specdf",
-            pd.DataFrame()
-        )
+if (
+    "specs" in st.session_state
+    and
+    not st.session_state["specs"].empty
+):
+
+    specs = st.session_state["specs"]
+
+    st.subheader(
+        "Research Results"
     )
 
-
-    if not specs_df.empty:
-
-        st.subheader(
-            "2. Specs found"
-        )
-
-
-        useful = []
-
-
-        for column in (
-            specs_df.columns
-        ):
-
-            if column in [
-                "Make",
-                "Model",
-                "Source URL",
-                "Error",
-            ]:
-
-                useful.append(
-                    column
-                )
-
-                continue
-
-
-            if (
-                specs_df[
-                    column
-                ]
-                .replace(
-                    "",
-                    pd.NA
-                )
-                .notna()
-                .any()
-            ):
-
-                useful.append(
-                    column
-                )
-
-
-        st.dataframe(
-            specs_df[
-                useful
-            ],
-            hide_index=True,
-            use_container_width=True,
-        )
-
-
-    # =====================================================
-    # EXCEL
-    # =====================================================
-
-    excel_file = (
-        create_excel(
-            models_df,
-            specs_df,
-            st.session_state.get(
-                "source",
-                ""
-            ),
-        )
+    # Remove completely empty columns
+    specs = specs.dropna(
+        axis=1,
+        how="all"
     )
 
+    st.dataframe(
+        specs,
+        hide_index=True,
+        use_container_width=True
+    )
+
+    excel = make_excel(
+        st.session_state["models"],
+        specs
+    )
 
     st.download_button(
         "⬇️ Download Excel",
-        data=excel_file,
-        file_name=(
-            "automotive_web_research_v5.xlsx"
-        ),
-        mime=(
-            "application/"
-            "vnd.openxmlformats-officedocument."
-            "spreadsheetml.sheet"
-        ),
-        use_container_width=True,
+        excel,
+        "automotive_research.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True
     )
-
-
-# =========================================================
-# FOOTER
-# =========================================================
-
-st.info(
-    "V5: model names are linked to their own vehicle cards. "
-    "Only models with a real model URL can be inspected. "
-    "Specs are flexible: available fields are shown; "
-    "missing fields remain blank."
-)

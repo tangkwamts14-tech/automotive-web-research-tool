@@ -23,7 +23,7 @@ st.title("🚗 Automotive Website Research")
 st.caption(
     "Website URL → Models → Variants → Specifications → Excel"
 )
-st.caption("App version: 2026-09-29 FULL-UI")
+st.caption("App version: 2026-09-30 FIXED-FULL-UI")
 
 
 # ============================================================

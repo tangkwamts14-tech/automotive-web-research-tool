@@ -467,3 +467,863 @@ def find_models(soup, base_url, make):
     )
 
     return df
+    # ============================================================
+# SPEC RESEARCH
+# ============================================================
+
+SPEC_WORDS = [
+    "specification", "specifications", "specs",
+    "technical", "technical data",
+    "features", "performance",
+    "engine", "powertrain",
+    "dimensions", "battery",
+]
+
+
+def discover_model_pages(model_url):
+    pages = {}
+
+    try:
+        final_url, soup = get_page(model_url)
+        pages["Model"] = (final_url, soup)
+    except Exception:
+        return pages
+
+    for a in soup.find_all("a", href=True):
+        text = clean(a.get_text(" ", strip=True)).lower()
+        href = urljoin(final_url, a.get("href"))
+
+        if not same_site(final_url, href):
+            continue
+
+        combined = text + " " + href.lower()
+
+        if not any(word in combined for word in SPEC_WORDS):
+            continue
+
+        if href in [x[0] for x in pages.values()]:
+            continue
+
+        try:
+            page_url, page_soup = get_page(href)
+
+            if clean(page_soup.get_text(" ", strip=True)):
+                pages[f"Page {len(pages)+1}"] = (
+                    page_url,
+                    page_soup
+                )
+
+        except Exception:
+            pass
+
+        if len(pages) >= 8:
+            break
+
+    return pages
+
+
+def extract_pairs(soup):
+    data = {}
+
+    # TABLES
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            cells = [
+                clean(x.get_text(" ", strip=True))
+                for x in tr.find_all(["th", "td"])
+            ]
+
+            if len(cells) == 2:
+                key, value = cells
+
+                if key and value:
+                    data[key] = value
+
+    # DL / DT / DD
+    for dt in soup.find_all("dt"):
+        dd = dt.find_next_sibling("dd")
+
+        if dd:
+            key = clean(dt.get_text(" ", strip=True))
+            value = clean(dd.get_text(" ", strip=True))
+
+            if key and value:
+                data[key] = value
+
+    return data
+
+
+def find_value(text, patterns):
+    for pattern in patterns:
+        match = re.search(
+            pattern,
+            text,
+            re.I
+        )
+
+        if match:
+            return clean(match.group(1))
+
+    return ""
+
+
+def generic_specs(soup):
+    text = clean(
+        soup.get_text(
+            " ",
+            strip=True
+        )
+    )
+
+    specs = {}
+
+    pairs = extract_pairs(soup)
+
+    aliases = {
+        "Engine Displacement": [
+            "engine displacement",
+            "displacement",
+            "engine capacity",
+            "capacity",
+        ],
+
+        "Engine Type": [
+            "engine type",
+        ],
+
+        "Cylinder Count": [
+            "cylinders",
+            "number of cylinders",
+            "cylinder count",
+        ],
+
+        "Fuel Type": [
+            "fuel type",
+            "fuel",
+        ],
+
+        "Max Power": [
+            "maximum power",
+            "max power",
+            "power output",
+            "engine power",
+        ],
+
+        "Max Torque": [
+            "maximum torque",
+            "max torque",
+            "torque",
+        ],
+
+        "Transmission": [
+            "transmission",
+            "gearbox",
+            "transmission type",
+        ],
+
+        "Drivetrain": [
+            "drivetrain",
+            "drive type",
+            "drive system",
+        ],
+
+        "Battery Capacity": [
+            "battery capacity",
+            "battery pack size",
+        ],
+
+        "EV Range": [
+            "electric range",
+            "driving range",
+            "ev range",
+            "range wltp",
+        ],
+
+        "Seats": [
+            "seats",
+            "seating capacity",
+        ],
+
+        "Overall Length": [
+            "overall length",
+            "length",
+        ],
+
+        "Overall Width": [
+            "overall width",
+            "width",
+        ],
+
+        "Overall Height": [
+            "overall height",
+            "height",
+        ],
+
+        "Wheelbase": [
+            "wheelbase",
+            "wheel base",
+        ],
+
+        "Ground Clearance": [
+            "ground clearance",
+        ],
+
+        "Fuel Tank": [
+            "fuel tank",
+            "fuel tank capacity",
+        ],
+
+        "Top Speed": [
+            "top speed",
+            "maximum speed",
+        ],
+
+        "Acceleration 0-100": [
+            "0-100",
+            "0 - 100",
+            "acceleration",
+        ],
+
+        "Tyre Size": [
+            "tyre size",
+            "tire size",
+        ],
+
+        "Wheels": [
+            "wheel size",
+            "wheels",
+        ],
+    }
+
+    for original_key, value in pairs.items():
+        low = original_key.lower()
+
+        for output_key, names in aliases.items():
+            if any(name in low for name in names):
+                if value:
+                    specs.setdefault(
+                        output_key,
+                        value
+                    )
+
+    regex_specs = {
+        "Max Power": [
+            r"(?:maximum|max)\s+power[^0-9]{0,20}([0-9.,]+\s*(?:hp|ps|kw))",
+            r"([0-9.,]+\s*(?:hp|ps|kw))\s+(?:maximum\s+)?power",
+        ],
+
+        "Max Torque": [
+            r"(?:maximum|max)\s+torque[^0-9]{0,20}([0-9.,]+\s*nm)",
+            r"([0-9.,]+\s*nm)\s+(?:maximum\s+)?torque",
+        ],
+
+        "Battery Capacity": [
+            r"battery\s+capacity[^0-9]{0,20}([0-9.,]+\s*kwh)",
+            r"([0-9.,]+\s*kwh)\s+battery",
+        ],
+
+        "EV Range": [
+            r"(?:electric|driving|ev)\s+range[^0-9]{0,30}([0-9.,]+\s*km)",
+        ],
+
+        "Overall Length": [
+            r"(?:overall\s+)?length[^0-9]{0,15}([0-9.,]+\s*mm)",
+        ],
+
+        "Overall Width": [
+            r"(?:overall\s+)?width[^0-9]{0,15}([0-9.,]+\s*mm)",
+        ],
+
+        "Overall Height": [
+            r"(?:overall\s+)?height[^0-9]{0,15}([0-9.,]+\s*mm)",
+        ],
+
+        "Wheelbase": [
+            r"wheel\s*base[^0-9]{0,15}([0-9.,]+\s*mm)",
+        ],
+    }
+
+    for key, patterns in regex_specs.items():
+        if not specs.get(key):
+            value = find_value(
+                text,
+                patterns
+            )
+
+            if value:
+                specs[key] = value
+
+    # drivetrain
+    if not specs.get("Drivetrain"):
+        match = re.search(
+            r"\b(AWD|4WD|FWD|RWD)\b",
+            text,
+            re.I,
+        )
+
+        if match:
+            specs["Drivetrain"] = (
+                match.group(1).upper()
+            )
+
+    return specs
+
+
+def detect_variants(soup):
+    variants = []
+
+    candidates = [
+        "GT-Line", "GT Line",
+        "Base model",
+        "Standard",
+        "Premium",
+        "Luxury",
+        "Executive",
+        "EX", "LX", "SX", "GX",
+    ]
+
+    text = clean(
+        soup.get_text(
+            " ",
+            strip=True
+        )
+    )
+
+    for variant in candidates:
+        if re.search(
+            r"(?<![A-Za-z0-9])"
+            + re.escape(variant)
+            + r"(?![A-Za-z0-9])",
+            text,
+            re.I,
+        ):
+            variants.append(variant)
+
+    return list(dict.fromkeys(variants))
+
+
+def extract_specs(model_url, make, model):
+    pages = discover_model_pages(
+        model_url
+    )
+
+    if not pages:
+        return [{
+            "Make": make,
+            "Model": model,
+            "Variant": "",
+            "Source URL": model_url,
+            "Status": "Page could not be read",
+        }]
+
+    combined_specs = {}
+    sources = []
+
+    variants = []
+
+    for _, (
+        page_url,
+        soup
+    ) in pages.items():
+
+        sources.append(page_url)
+
+        specs = generic_specs(soup)
+
+        for key, value in specs.items():
+            if (
+                value
+                and not combined_specs.get(key)
+            ):
+                combined_specs[key] = value
+
+        found_variants = detect_variants(
+            soup
+        )
+
+        for variant in found_variants:
+            if variant not in variants:
+                variants.append(variant)
+
+    if not variants:
+        variants = [""]
+
+    rows = []
+
+    for variant in variants:
+        row = {
+            "Make": make,
+            "Model": model,
+            "Variant": variant,
+            "Source URL": model_url,
+            "Research Source URLs":
+                " | ".join(
+                    list(dict.fromkeys(sources))
+                ),
+        }
+
+        row.update(combined_specs)
+
+        rows.append(row)
+
+    return rows
+
+
+# ============================================================
+# EXCEL
+# ============================================================
+
+def create_excel(models_df, specs_df):
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        models_df.to_excel(
+            writer,
+            index=False,
+            sheet_name="Models"
+        )
+
+        specs_df.to_excel(
+            writer,
+            index=False,
+            sheet_name="Specs"
+        )
+
+        for sheet_name in [
+            "Models",
+            "Specs"
+        ]:
+            ws = writer.book[
+                sheet_name
+            ]
+
+            ws.freeze_panes = "A2"
+
+            for column_cells in ws.columns:
+                max_length = 0
+
+                column_letter = (
+                    column_cells[0]
+                    .column_letter
+                )
+
+                for cell in column_cells:
+                    value = str(
+                        cell.value or ""
+                    )
+
+                    max_length = max(
+                        max_length,
+                        len(value)
+                    )
+
+                ws.column_dimensions[
+                    column_letter
+                ].width = min(
+                    max(
+                        max_length + 2,
+                        12
+                    ),
+                    45
+                )
+
+    return output.getvalue()
+
+
+# ============================================================
+# UI
+# ============================================================
+
+st.divider()
+
+url = st.text_input(
+    "Website URL",
+    value=st.session_state.get(
+        "current_url",
+        ""
+    ),
+    placeholder=(
+        "https://www.kia.com/aljabr/en/main.html"
+    ),
+)
+
+
+research = st.button(
+    "🔎 Research Website",
+    type="primary",
+    use_container_width=True,
+)
+
+
+if research:
+
+    # Clear OLD website results first.
+    for key in [
+        "make",
+        "models",
+        "specs",
+    ]:
+        st.session_state.pop(
+            key,
+            None
+        )
+
+    if not clean(url):
+        st.warning(
+            "ใส่ URL ก่อนค่ะ"
+        )
+
+    else:
+        try:
+            with st.spinner(
+                "กำลังค้นหารุ่นรถ..."
+            ):
+                normalized = (
+                    normalize_url(url)
+                )
+
+                final_url, soup = (
+                    get_page(
+                        normalized
+                    )
+                )
+
+                make = detect_make(
+                    soup,
+                    final_url
+                )
+
+                models_df = (
+                    find_models(
+                        soup,
+                        final_url,
+                        make
+                    )
+                )
+
+                st.session_state[
+                    "current_url"
+                ] = normalized
+
+                st.session_state[
+                    "make"
+                ] = make
+
+                st.session_state[
+                    "models"
+                ] = models_df
+
+                st.session_state[
+                    "specs"
+                ] = pd.DataFrame()
+
+        except Exception as error:
+            st.error(
+                "อ่านเว็บไซต์ไม่ได้: "
+                + str(error)
+            )
+
+
+# ============================================================
+# MODELS
+# ============================================================
+
+if "models" in st.session_state:
+
+    models_df = (
+        st.session_state[
+            "models"
+        ]
+    )
+
+    c1, c2 = st.columns(2)
+
+    c1.metric(
+        "Make",
+        st.session_state.get(
+            "make",
+            "-"
+        )
+    )
+
+    c2.metric(
+        "Models found",
+        len(models_df)
+    )
+
+    st.subheader(
+        "Models"
+    )
+
+    if models_df.empty:
+        st.warning(
+            "ยังไม่พบ Model จากเว็บไซต์นี้"
+        )
+
+    else:
+        select_df = (
+            models_df.copy()
+        )
+
+        select_df.insert(
+            0,
+            "Research Specs",
+            False
+        )
+
+        edited = st.data_editor(
+            select_df,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "Research Specs":
+                    st.column_config.CheckboxColumn(
+                        "Research Specs"
+                    ),
+
+                "Model URL":
+                    st.column_config.LinkColumn(
+                        "Model URL"
+                    ),
+            },
+            disabled=[
+                "Make",
+                "Model",
+                "Model URL",
+            ],
+        )
+
+        col1, col2 = (
+            st.columns(2)
+        )
+
+        get_selected = (
+            col1.button(
+                "⚙️ Get Selected Specs",
+                use_container_width=True,
+            )
+        )
+
+        get_all = (
+            col2.button(
+                "🚗 Get ALL Specs",
+                use_container_width=True,
+            )
+        )
+
+        if (
+            get_selected
+            or get_all
+        ):
+
+            if get_all:
+                selected = (
+                    models_df
+                )
+
+            else:
+                selected = edited[
+                    edited[
+                        "Research Specs"
+                    ] == True
+                ]
+
+            if selected.empty:
+                st.warning(
+                    "ติ๊กรุ่นที่ต้องการก่อนค่ะ"
+                )
+
+            else:
+                all_results = []
+
+                progress = (
+                    st.progress(0)
+                )
+
+                status = st.empty()
+
+                total = len(
+                    selected
+                )
+
+                for number, (
+                    _,
+                    row
+                ) in enumerate(
+                    selected.iterrows(),
+                    start=1,
+                ):
+
+                    status.write(
+                        "กำลังอ่าน "
+                        + str(
+                            row["Make"]
+                        )
+                        + " "
+                        + str(
+                            row["Model"]
+                        )
+                        + f" ({number}/{total})"
+                    )
+
+                    try:
+                        model_results = (
+                            extract_specs(
+                                row[
+                                    "Model URL"
+                                ],
+                                row[
+                                    "Make"
+                                ],
+                                row[
+                                    "Model"
+                                ],
+                            )
+                        )
+
+                    except Exception as error:
+                        model_results = [{
+                            "Make":
+                                row["Make"],
+
+                            "Model":
+                                row["Model"],
+
+                            "Variant": "",
+
+                            "Source URL":
+                                row[
+                                    "Model URL"
+                                ],
+
+                            "Status":
+                                str(error),
+                        }]
+
+                    all_results.extend(
+                        model_results
+                    )
+
+                    progress.progress(
+                        number / total
+                    )
+
+                status.success(
+                    "เสร็จแล้ว"
+                )
+
+                st.session_state[
+                    "specs"
+                ] = pd.DataFrame(
+                    all_results
+                )
+
+
+# ============================================================
+# RESULTS
+# ============================================================
+
+specs_df = (
+    st.session_state.get(
+        "specs",
+        pd.DataFrame()
+    )
+)
+
+if not specs_df.empty:
+
+    specs_df = (
+        specs_df
+        .replace("", pd.NA)
+        .dropna(
+            axis=1,
+            how="all"
+        )
+        .fillna("")
+    )
+
+    preferred = [
+        "Make",
+        "Model",
+        "Variant",
+        "Fuel Type",
+        "Engine Type",
+        "Engine Displacement",
+        "Cylinder Count",
+        "Max Power",
+        "Max Torque",
+        "Transmission",
+        "Drivetrain",
+        "Battery Capacity",
+        "EV Range",
+        "Top Speed",
+        "Acceleration 0-100",
+        "Seats",
+        "Overall Length",
+        "Overall Width",
+        "Overall Height",
+        "Wheelbase",
+        "Ground Clearance",
+        "Fuel Tank",
+        "Wheels",
+        "Tyre Size",
+        "Source URL",
+        "Research Source URLs",
+        "Status",
+    ]
+
+    ordered = [
+        column
+        for column in preferred
+        if column
+        in specs_df.columns
+    ]
+
+    extras = [
+        column
+        for column
+        in specs_df.columns
+        if column
+        not in ordered
+    ]
+
+    specs_df = specs_df[
+        ordered + extras
+    ]
+
+    st.subheader(
+        "Specifications"
+    )
+
+    st.dataframe(
+        specs_df,
+        hide_index=True,
+        width="stretch",
+    )
+
+    excel_data = (
+        create_excel(
+            st.session_state[
+                "models"
+            ],
+            specs_df
+        )
+    )
+
+    st.download_button(
+        "⬇️ Download Excel",
+        data=excel_data,
+        file_name=(
+            "automotive_research.xlsx"
+        ),
+        mime=(
+            "application/vnd."
+            "openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        use_container_width=True,
+    )

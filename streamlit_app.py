@@ -801,8 +801,337 @@ def detect_variants(soup):
 
     return list(dict.fromkeys(variants))
 
+# ============================================================
+# VARIANT / GRADE EXTRACTION
+# ============================================================
+
+def parse_engine_string(value):
+    result = {}
+
+    value = clean(value)
+
+    if not value:
+        return result
+
+    result["Engine Type"] = value
+
+    m = re.search(r"(\d+(?:\.\d+)?)\s*L\b", value, re.I)
+    if m:
+        result["Engine Displacement"] = m.group(1) + " L"
+
+    m = re.search(r"(\d+)\s*[- ]?CYLINDER", value, re.I)
+    if m:
+        result["Cylinder Count"] = m.group(1)
+
+    if re.search(r"\bPETROL\b|\bGASOLINE\b", value, re.I):
+        result["Fuel Type"] = "Petrol"
+    elif re.search(r"\bDIESEL\b", value, re.I):
+        result["Fuel Type"] = "Diesel"
+    elif re.search(r"\bHYBRID\b|\bHEV\b", value, re.I):
+        result["Fuel Type"] = "Hybrid"
+    elif re.search(r"\bELECTRIC\b|\bBEV\b", value, re.I):
+        result["Fuel Type"] = "Electric"
+
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*(HP|PS|kW)\b",
+        value,
+        re.I,
+    )
+    if m:
+        result["Max Power"] = (
+            m.group(1) + " " + m.group(2).upper()
+        )
+
+    m = re.search(
+        r"(\d+(?:\.\d+)?)\s*N[- ]?m\b",
+        value,
+        re.I,
+    )
+    if m:
+        result["Max Torque"] = m.group(1) + " Nm"
+
+    return result
+
+
+def extract_grade_sections(soup, make, model, source_url):
+    """
+    Reads pages where each grade/variant is a heading followed by
+    Technical Features / Engine / Transmission / Wheels etc.
+    """
+
+    rows = []
+
+    headings = soup.find_all(
+        ["h1", "h2", "h3", "h4", "h5"]
+    )
+
+    bad_headings = {
+        "technical features",
+        "interior features",
+        "exterior features",
+        "safety & convenience features",
+        "audio & entertainment system",
+        "grades",
+        "explore by grades",
+        "full specs",
+        "specifications",
+        "specification",
+    }
+
+    for heading in headings:
+
+        variant = clean(
+            heading.get_text(
+                " ",
+                strip=True
+            )
+        )
+
+        low = variant.lower()
+
+        if not variant:
+            continue
+
+        if low in bad_headings:
+            continue
+
+        # Grade names normally contain letters/numbers such as
+        # 1.5L XLI Executive / Premium / GT-Line etc.
+        looks_like_grade = bool(
+            re.search(
+                r"\d+(?:\.\d+)?\s*L|"
+                r"\b(XLI|GLI|LX|EX|SX|GX|"
+                r"EXECUTIVE|PREMIUM|STANDARD|"
+                r"LUXURY|GT[- ]?LINE|HEV|HYBRID)\b",
+                variant,
+                re.I,
+            )
+        )
+
+        if not looks_like_grade:
+            continue
+
+        content = []
+
+        node = heading.find_next_sibling()
+
+        while node is not None:
+
+            if (
+                getattr(node, "name", None)
+                in ["h1", "h2", "h3", "h4", "h5"]
+            ):
+                next_heading = clean(
+                    node.get_text(
+                        " ",
+                        strip=True
+                    )
+                )
+
+                if re.search(
+                    r"\d+(?:\.\d+)?\s*L|"
+                    r"\b(XLI|GLI|LX|EX|SX|GX|"
+                    r"EXECUTIVE|PREMIUM|STANDARD|"
+                    r"LUXURY|GT[- ]?LINE|HEV|HYBRID)\b",
+                    next_heading,
+                    re.I,
+                ):
+                    break
+
+            text = clean(
+                node.get_text(
+                    " ",
+                    strip=True
+                )
+                if hasattr(node, "get_text")
+                else ""
+            )
+
+            if text:
+                content.append(text)
+
+            node = node.find_next_sibling()
+
+        block = clean(
+            " ".join(content)
+        )
+
+        if not block:
+            continue
+
+        row = {
+            "Make": make,
+            "Model": model,
+            "Variant": variant,
+            "Source URL": source_url,
+        }
+
+        # ENGINE
+        m = re.search(
+            r"Engine\s*:\s*(.+?)"
+            r"(?=\s+(?:Max Output|Max Power|Max Torque|"
+            r"Transmission|Wheels|Tire Size|Tyre Size|"
+            r"Dimensions|Fuel Efficiency|Fuel Tank|$))",
+            block,
+            re.I,
+        )
+
+        if m:
+            engine = clean(m.group(1))
+
+            row.update(
+                parse_engine_string(engine)
+            )
+
+        # MAX OUTPUT
+        m = re.search(
+            r"(?:Max Output|Maximum Output|Max Power)"
+            r"\s*:\s*"
+            r"(\d+(?:\.\d+)?)\s*(HP|PS|kW)",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Max Power"] = (
+                m.group(1)
+                + " "
+                + m.group(2).upper()
+            )
+
+        # TORQUE
+        m = re.search(
+            r"(?:Max Torque|Maximum Torque)"
+            r"\s*:?\s*"
+            r"(\d+(?:\.\d+)?)\s*N[- ]?m",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Max Torque"] = (
+                m.group(1) + " Nm"
+            )
+
+        # TRANSMISSION
+        m = re.search(
+            r"Transmission\s*:\s*(.+?)"
+            r"(?=\s+(?:Wheels|Tire Size|Tyre Size|"
+            r"Dimensions|Fuel Efficiency|Fuel Tank|"
+            r"Exterior Features|Interior Features|$))",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Transmission"] = clean(
+                m.group(1)
+            )
+
+        # WHEELS
+        m = re.search(
+            r"Wheels?\s*:\s*(.+?)"
+            r"(?=\s+(?:Tire Size|Tyre Size|"
+            r"Transmission|Dimensions|$))",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Wheels"] = clean(
+                m.group(1)
+            )
+
+        # TYRE
+        m = re.search(
+            r"(?:Tire|Tyre)\s*Size\s*:\s*"
+            r"([0-9A-Za-z/\- ]+)",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Tyre Size"] = clean(
+                m.group(1)
+            )
+
+        # DIMENSIONS L-W-H
+        m = re.search(
+            r"Dimensions\s+L\s*-\s*W\s*-\s*H"
+            r"\s*\(mm\)\s*:\s*"
+            r"([\d,.]+)\s*-\s*"
+            r"([\d,.]+)\s*-\s*"
+            r"([\d,.]+)",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Overall Length"] = m.group(1) + " mm"
+            row["Overall Width"] = m.group(2) + " mm"
+            row["Overall Height"] = m.group(3) + " mm"
+
+        # FUEL EFFICIENCY
+        m = re.search(
+            r"Fuel Efficiency\s*:\s*"
+            r"([\d.]+\s*KM/L)",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Fuel Efficiency"] = clean(
+                m.group(1)
+            )
+
+        # FUEL TANK
+        m = re.search(
+            r"Fuel Tank Capacity\s*:\s*"
+            r"([\d.]+\s*L)",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Fuel Tank"] = clean(
+                m.group(1)
+            )
+
+        # DRIVETRAIN
+        m = re.search(
+            r"\b(AWD|4WD|FWD|RWD)\b",
+            block,
+            re.I,
+        )
+
+        if m:
+            row["Drivetrain"] = (
+                m.group(1).upper()
+            )
+
+        rows.append(row)
+
+    # Remove duplicates
+    unique = []
+    seen = set()
+
+    for row in rows:
+
+        key = (
+            row["Make"],
+            row["Model"],
+            row["Variant"],
+        )
+
+        if key not in seen:
+            seen.add(key)
+            unique.append(row)
+
+    return unique
+
 
 def extract_specs(model_url, make, model):
+
     pages = discover_model_pages(
         model_url
     )
@@ -816,61 +1145,117 @@ def extract_specs(model_url, make, model):
             "Status": "Page could not be read",
         }]
 
-    combined_specs = {}
-    sources = []
+    all_rows = []
 
-    variants = []
+    research_urls = []
 
     for _, (
         page_url,
         soup
     ) in pages.items():
 
-        sources.append(page_url)
-
-        specs = generic_specs(soup)
-
-        for key, value in specs.items():
-            if (
-                value
-                and not combined_specs.get(key)
-            ):
-                combined_specs[key] = value
-
-        found_variants = detect_variants(
-            soup
+        research_urls.append(
+            page_url
         )
 
-        for variant in found_variants:
-            if variant not in variants:
-                variants.append(variant)
+        grade_rows = (
+            extract_grade_sections(
+                soup,
+                make,
+                model,
+                page_url,
+            )
+        )
 
-    if not variants:
-        variants = [""]
+        if grade_rows:
+            all_rows.extend(
+                grade_rows
+            )
 
-    rows = []
+    # --------------------------------------------------------
+    # If grade parser found nothing, use generic parser
+    # --------------------------------------------------------
 
-    for variant in variants:
+    if not all_rows:
+
+        combined = {}
+
+        for _, (
+            page_url,
+            soup
+        ) in pages.items():
+
+            specs = generic_specs(
+                soup
+            )
+
+            for key, value in specs.items():
+
+                if (
+                    value
+                    and not combined.get(key)
+                ):
+                    combined[key] = value
+
         row = {
             "Make": make,
             "Model": model,
-            "Variant": variant,
+            "Variant": "",
             "Source URL": model_url,
-            "Research Source URLs":
-                " | ".join(
-                    list(dict.fromkeys(sources))
-                ),
         }
 
-        row.update(combined_specs)
+        row.update(
+            combined
+        )
 
-        rows.append(row)
+        all_rows = [row]
 
-    return rows
+    # --------------------------------------------------------
+    # Merge duplicate variants
+    # --------------------------------------------------------
 
+    merged = {}
 
-# ============================================================
-# EXCEL
+    for row in all_rows:
+
+        key = clean(
+            row.get(
+                "Variant",
+                ""
+            )
+        ).lower()
+
+        if key not in merged:
+            merged[key] = row.copy()
+
+        else:
+            for field, value in row.items():
+
+                if (
+                    value
+                    and not merged[key].get(field)
+                ):
+                    merged[key][field] = value
+
+    final_rows = list(
+        merged.values()
+    )
+
+    source_text = " | ".join(
+        list(
+            dict.fromkeys(
+                research_urls
+            )
+        )
+    )
+
+    for row in final_rows:
+        row[
+            "Research Source URLs"
+        ] = source_text
+
+    return final_rows
+    
 # ============================================================
 
 def create_excel(models_df, specs_df):
@@ -1268,7 +1653,7 @@ if not specs_df.empty:
         "Overall Height",
         "Wheelbase",
         "Ground Clearance",
-        "Fuel Tank",
+        "Fuel Tank", "Fuel Efficiency",
         "Wheels",
         "Tyre Size",
         "Source URL",

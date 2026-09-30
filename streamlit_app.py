@@ -1166,7 +1166,259 @@ def extract_specs(model_url, make, model):
                 page_url,
             )
         )
+        # ====================================================
+        # KIA / HORIZONTAL SPEC TABLE
+        # ====================================================
 
+        for table in soup.find_all("table"):
+
+            matrix = []
+
+            for tr in table.find_all("tr"):
+                cells = [
+                    clean(x.get_text(" ", strip=True))
+                    for x in tr.find_all(["th", "td"])
+                ]
+
+                if cells:
+                    matrix.append(cells)
+
+            if len(matrix) < 2:
+                continue
+
+            max_cols = max(len(r) for r in matrix)
+
+            if max_cols < 3:
+                continue
+
+            # Normalize rows
+            matrix = [
+                r + [""] * (max_cols - len(r))
+                for r in matrix
+            ]
+
+            # ------------------------------------------------
+            # Find variant names from first useful row
+            # Example:
+            # ["", "GT-Line", "Base model"]
+            # ------------------------------------------------
+
+            variant_row_index = None
+            variant_names = []
+
+            for i, r in enumerate(matrix[:8]):
+
+                values = [
+                    clean(x)
+                    for x in r[1:]
+                ]
+
+                nonempty = [
+                    x for x in values
+                    if x
+                ]
+
+                if len(nonempty) >= 2:
+
+                    joined = " ".join(nonempty)
+
+                    if not re.search(
+                        r"\b(mm|kg|kw|nm|hp|ps|kwh|km)\b",
+                        joined,
+                        re.I,
+                    ):
+                        variant_row_index = i
+                        variant_names = values
+                        break
+
+            if variant_row_index is None:
+                continue
+
+            for col_index, variant in enumerate(
+                variant_names,
+                start=1,
+            ):
+
+                variant = clean(variant)
+
+                if not variant:
+                    continue
+
+                row = {
+                    "Make": make,
+                    "Model": model,
+                    "Variant": variant,
+                    "Source URL": page_url,
+                }
+
+                for r in matrix[
+                    variant_row_index + 1:
+                ]:
+
+                    if len(r) <= col_index:
+                        continue
+
+                    label = clean(r[0])
+                    value = clean(r[col_index])
+
+                    if not label or not value:
+                        continue
+
+                    low = label.lower()
+
+                    # ENGINE
+                    if (
+                        "engine type" in low
+                        or low == "engine"
+                    ):
+                        row["Engine Type"] = value
+                        row.update(
+                            parse_engine_string(value)
+                        )
+
+                    elif (
+                        "displacement" in low
+                        or "engine capacity" in low
+                    ):
+                        row["Engine Displacement"] = value
+
+                    elif (
+                        "cylinder" in low
+                    ):
+                        row["Cylinder Count"] = value
+
+                    elif (
+                        "fuel type" in low
+                    ):
+                        row["Fuel Type"] = value
+
+                    # POWER
+                    elif (
+                        "max power" in low
+                        or "maximum power" in low
+                        or "max output" in low
+                        or "maximum output" in low
+                    ):
+                        row["Max Power"] = value
+
+                    # TORQUE
+                    elif (
+                        "torque" in low
+                    ):
+                        row["Max Torque"] = value
+
+                    # TRANSMISSION
+                    elif (
+                        "transmission" in low
+                        or "gearbox" in low
+                    ):
+                        row["Transmission"] = value
+
+                    # DRIVE
+                    elif (
+                        "drive type" in low
+                        or "drivetrain" in low
+                        or "drive system" in low
+                    ):
+                        row["Drivetrain"] = value
+
+                    # BATTERY
+                    elif (
+                        "battery capacity" in low
+                        or "battery pack" in low
+                    ):
+                        row["Battery Capacity"] = value
+
+                    # EV RANGE
+                    elif (
+                        "range" in low
+                        and (
+                            "driving" in low
+                            or "electric" in low
+                            or "wltp" in low
+                        )
+                    ):
+                        row["EV Range"] = value
+
+                    # CHARGING
+                    elif (
+                        "charging" in low
+                        or "charge time" in low
+                    ):
+                        row["Charging"] = value
+
+                    # LENGTH
+                    elif (
+                        "overall length" in low
+                        or low == "length"
+                    ):
+                        row["Overall Length"] = value
+
+                    # WIDTH
+                    elif (
+                        "overall width" in low
+                        or low == "width"
+                    ):
+                        row["Overall Width"] = value
+
+                    # HEIGHT
+                    elif (
+                        "overall height" in low
+                        or low == "height"
+                    ):
+                        row["Overall Height"] = value
+
+                    # WHEELBASE
+                    elif (
+                        "wheelbase" in low
+                        or "wheel base" in low
+                    ):
+                        row["Wheelbase"] = value
+
+                    # CLEARANCE
+                    elif (
+                        "ground clearance" in low
+                    ):
+                        row["Ground Clearance"] = value
+
+                    # WHEEL
+                    elif (
+                        "wheel" in low
+                        and "base" not in low
+                    ):
+                        row["Wheels"] = value
+
+                    # TYRE
+                    elif (
+                        "tire" in low
+                        or "tyre" in low
+                    ):
+                        row["Tyre Size"] = value
+
+                    # SEATS
+                    elif (
+                        "seat" in low
+                        and "heated" not in low
+                    ):
+                        row["Seats"] = value
+
+                    # TOP SPEED
+                    elif (
+                        "top speed" in low
+                        or "maximum speed" in low
+                    ):
+                        row["Top Speed"] = value
+
+                    # ACCELERATION
+                    elif (
+                        "0-100" in low
+                        or "acceleration" in low
+                    ):
+                        row["Acceleration 0-100"] = value
+
+                # Only keep if the row has actual specs
+                if len(row) > 4:
+                    all_rows.append(row)
         if grade_rows:
             all_rows.extend(
                 grade_rows
@@ -1644,7 +1896,7 @@ if not specs_df.empty:
         "Transmission",
         "Drivetrain",
         "Battery Capacity",
-        "EV Range",
+        "EV Range", "Charging",
         "Top Speed",
         "Acceleration 0-100",
         "Seats",
